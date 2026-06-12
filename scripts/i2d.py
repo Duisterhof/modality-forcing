@@ -24,22 +24,22 @@ from scripts._common import (
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Text + image -> depth (i2d mode).")
-    add_shared_args(p)
-    p.add_argument("--image", required=True, help="Path to the input RGB image.")
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="Text + image -> depth (i2d mode).")
+    add_shared_args(parser)
+    parser.add_argument("--image", required=True, help="Path to the input RGB image.")
+    parser.add_argument(
         "--fov-deg",
         type=float,
         default=65.0,
-        help="Vertical field of view used to back-project the cloud.",
+        help="Horizontal field of view used to back-project the cloud.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--sor",
         action="store_true",
         help="Also apply statistical outlier removal to the point "
         "cloud (off by default; can over-trim fine structures).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--edge-rtol",
         type=float,
         default=0.04,
@@ -47,7 +47,7 @@ def main() -> int:
         "> this fraction (removes occlusion-boundary floaters). "
         "Lower = more aggressive; 0 = off.",
     )
-    args = p.parse_args()
+    args = parser.parse_args()
 
     image = read_image_rgb(args.image)
     runner = load_runner(args)
@@ -64,7 +64,7 @@ def main() -> int:
     for key, path in paths.items():
         print(f"  {key}: {path}")
     glb = os.path.join(paths["run_dir"], "cloud.glb")
-    n, cloud_paths = write_point_cloud(
+    num_points, cloud_paths = write_point_cloud(
         result["rgb"],
         result["depth"],
         glb,
@@ -72,8 +72,8 @@ def main() -> int:
         edge_rtol=args.edge_rtol,
         sor=args.sor,
     )
-    for cp in cloud_paths:
-        print(f"  point_cloud: {cp} ({n:,} points)")
+    for cloud_path in cloud_paths:
+        print(f"  point_cloud: {cloud_path} ({num_points:,} points)")
     return 0
 
 

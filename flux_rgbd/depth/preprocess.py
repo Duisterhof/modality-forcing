@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 World Labs.
-"""Depth-side decoding: model tokens -> depth pixel map.
+"""Depth-side encoding and decoding: model tokens <-> depth pixel map.
 
 Decoding steps:
   1. Unpatchify the (tok_h, tok_w, patch_h * patch_w) token grid.
@@ -97,7 +97,7 @@ def _contract(z: Tensor) -> Tensor:
 def _apply_stage(depth: Tensor, stage: str) -> Tensor:
     """Forward of `_undo_stage`. Only `contract` and `unit_mean` are active.
 
-    `unit_mean` divides by the per-map mean so the depth is scale-normalised
+    `unit_mean` divides by the per-map mean so the depth is scale-normalized
     the way the model was trained; it is pass-through on decode (the absolute
     scale is not recoverable), so encode/decode round-trips up to that scale.
     """
@@ -117,7 +117,7 @@ def encode_depth(depth_map: Tensor, config: DepthConfig) -> Tensor:
     Output shape: (..., H/patch_size, W/patch_size, patch_size**2)
 
     Used for ``mode="d2i"`` to turn a depth map into the depth-stream tokens
-    the model conditions on. Because `unit_mean` is scale-normalising, only the
+    the model conditions on. Because `unit_mean` is scale-normalizing, only the
     relative depth structure matters -- the input need not be metric.
     """
     p = config.patch_size

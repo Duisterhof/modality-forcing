@@ -181,11 +181,11 @@ class Flux2(nn.Module):
 
 class SelfAttention(nn.Module):
     """
-    Multi-head self-attention with QK normalization.
+    Projection layers for multi-head attention with QK normalization.
 
-    This module computes query, key, and value projections in a single linear layer,
-    applies RMS normalization to queries and keys, then performs attention and projects
-    the output back to the original dimension.
+    This module holds a fused QKV projection, RMS normalization for queries and
+    keys, and an output projection. It has no forward method; DoubleStreamBlock
+    calls the submodules directly around a joint text+image attention.
     """
 
     def __init__(self, dim: int, num_heads: int = 8):
@@ -556,14 +556,21 @@ class EmbedND(nn.Module):
         return emb.unsqueeze(1)
 
 
-def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: float = 1000.0):
+def timestep_embedding(
+    t: Tensor, dim: int, max_period: int = 10000, time_factor: float = 1000.0
+) -> Tensor:
     """
     Create sinusoidal timestep embeddings.
-    :param t: a 1-D Tensor of N indices, one per batch element.
-                      These may be fractional.
-    :param dim: the dimension of the output.
-    :param max_period: controls the minimum frequency of the embeddings.
-    :return: an (N, D) Tensor of positional embeddings.
+
+    Args:
+        t: A 1-D tensor of N indices, one per batch element. These may be
+            fractional.
+        dim: The dimension of the output.
+        max_period: Controls the minimum frequency of the embeddings.
+        time_factor: Scale applied to `t` before the sinusoidal encoding.
+
+    Returns:
+        An (N, D) tensor of positional embeddings.
     """
     t = time_factor * t
     half = dim // 2
@@ -586,8 +593,7 @@ class RMSNorm(torch.nn.Module):
     """
     Root Mean Square Layer Normalization.
 
-    RMSNorm normalizes using only the variance (RMS) without centering by mean,
-    providing a simpler and often equally effective alternative to LayerNorm.
+    RMSNorm normalizes using only the variance (RMS) without centering by mean.
     """
 
     def __init__(self, dim: int):
@@ -616,8 +622,8 @@ class QKNorm(torch.nn.Module):
     """
     Separate RMSNorm for query and key tensors in attention.
 
-    Normalizing queries and keys independently before attention computation improves
-    training stability and can lead to better performance.
+    Normalizing queries and keys independently before attention computation
+    improves training stability.
     """
 
     def __init__(self, dim: int):

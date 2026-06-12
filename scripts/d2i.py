@@ -26,20 +26,20 @@ from scripts._common import (
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Text + depth -> RGB (d2i mode).")
-    add_shared_args(p)
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="Text + depth -> RGB (d2i mode).")
+    add_shared_args(parser)
+    parser.add_argument(
         "--depth",
         required=True,
         help="Path to the input depth map (.npy or 16-bit PNG/TIFF).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--cfg-scale",
         type=float,
         default=4.0,
         help="Classifier-free guidance scale for the RGB stream.",
     )
-    args = p.parse_args()
+    args = parser.parse_args()
 
     depth_map = read_depth_map(args.depth)
     runner = load_runner(args)

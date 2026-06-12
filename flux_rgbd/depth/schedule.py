@@ -30,6 +30,8 @@ Mode = Literal["joint", "i2d", "d2i"]
 
 @dataclasses.dataclass
 class ScheduleConfig:
+    """Per-modality shift-transform parameters consumed by `rollout_timesteps`."""
+
     rgb_shift_mu: float = 0.0
     rgb_shift_sigma: float = 1.0
     depth_shift_mu: float = 0.0
@@ -62,7 +64,7 @@ def rollout_timesteps(
     device: torch.device | str | None = None,
     dtype: torch.dtype = torch.float32,
 ) -> tuple[Tensor, Tensor]:
-    """Return per-modality timestep tensors of shape `(num_steps + 1,)`.
+    """Return ``(t_rgb, t_depth)`` timestep tensors of shape ``(num_steps + 1,)``.
 
     ``log2_alpha`` (joint mode only) tilts the RGB/depth denoising trajectory:
     the depth schedule becomes ``f_alpha(t_rgb)`` with ``alpha = 2 **

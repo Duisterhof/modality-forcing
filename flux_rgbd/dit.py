@@ -116,7 +116,7 @@ class _TripleStreamBlock(nn.Module):
 
     @staticmethod
     def _residual(x, attn_out, proj, gate1, mod2, norm2, mlp):
-        """attn residual then MLP residual, both gated. Standard DiT pattern."""
+        """Attention residual then MLP residual, both gated. Standard DiT pattern."""
         x = x + gate1 * proj(attn_out)
         shift, scale, gate2 = mod2
         return x + gate2 * mlp((1 + scale) * norm2(x) + shift)
@@ -130,15 +130,15 @@ class _TripleStreamBlock(nn.Module):
         q_txt, k_txt, v_txt, g_txt = self._qkv(
             txt, self.txt_norm1, self.txt_attn, mod_txt[0]
         )
-        q_d, k_d, v_d, g_d = self._qkv(
+        q_depth, k_depth, v_depth, g_depth = self._qkv(
             depth, self.depth_norm1, self.depth_attn, mod_depth[0]
         )
 
         # Joint attention over [txt, img, depth]; BFL's `attention` does
         # RoPE + scaled_dot_product_attention + rearrange.
-        q = torch.cat([q_txt, q_img, q_d], dim=2)
-        k = torch.cat([k_txt, k_img, k_d], dim=2)
-        v = torch.cat([v_txt, v_img, v_d], dim=2)
+        q = torch.cat([q_txt, q_img, q_depth], dim=2)
+        k = torch.cat([k_txt, k_img, k_depth], dim=2)
+        v = torch.cat([v_txt, v_img, v_depth], dim=2)
         pe = torch.cat([pe_txt, pe_img, pe_depth], dim=2)
         out = flux2_model.attention(q, k, v, pe)
 
@@ -169,7 +169,7 @@ class _TripleStreamBlock(nn.Module):
             depth,
             depth_out,
             self.depth_attn.proj,
-            g_d,
+            g_depth,
             mod_depth[1],
             self.depth_norm2,
             self.depth_mlp,
@@ -290,7 +290,7 @@ class FluxRGBDDiT(nn.Module):
         # Position embedder shared across streams.
         self.pe_embedder = EmbedND(dim=pe_dim, theta=theta, axes_dim=axes_dim)
 
-        # Dual-stream stack.
+        # Triple-stream stack.
         self.double_blocks = nn.ModuleList(
             [
                 _TripleStreamBlock(hidden_size, num_heads, mlp_ratio)
@@ -396,7 +396,7 @@ class FluxRGBDDiT(nn.Module):
 
         # Cross-stream timestep mixing (see __init__): fold the other stream's
         # noise level into each modulation vector. The scalar gate is part of
-        # the body dtype after `.to(dtype=…)`, so no extra cast is needed.
+        # the body dtype after `.to(dtype=...)`, so no extra cast is needed.
         if self.cross_stream_timestep_mixing:
             vec_img = vec_img + self.cross_alpha_img * self.time_in_depth_to_img(
                 depth_t_emb
@@ -422,7 +422,7 @@ class FluxRGBDDiT(nn.Module):
         pe_txt = self.pe_embedder(ctx_ids)
         pe_depth = self.pe_embedder(depth_ids)
 
-        # Dual-stream stack.
+        # Triple-stream stack.
         for block in self.double_blocks:
             img, txt, depth = block(
                 img,

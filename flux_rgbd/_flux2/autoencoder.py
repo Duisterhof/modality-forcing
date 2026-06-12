@@ -20,6 +20,7 @@ Adapted from the FLUX.2 codebase:
 """
 
 import math
+import os
 from collections.abc import Sequence
 
 import torch
@@ -49,9 +50,11 @@ DEFAULT_Z_CHANNELS = 32
 
 
 def _hf_download(repo_id: str, filename: str) -> str:
-    """Resolve a HuggingFace Hub file path. Lazy-import hf_hub to keep the
-    base package importable in environments that pin huggingface_hub via
-    extras."""
+    """Resolve a HuggingFace Hub file path.
+
+    Lazy-import hf_hub to keep the base package importable in environments
+    that pin huggingface_hub via extras.
+    """
     from huggingface_hub import hf_hub_download
 
     return hf_hub_download(repo_id=repo_id, filename=filename)
@@ -60,8 +63,6 @@ def _hf_download(repo_id: str, filename: str) -> str:
 def _load_weights(repo_id: str, filename: str) -> dict[str, Tensor]:
     # Allow callers to point at a local file via env var. Useful for tests
     # and air-gapped environments.
-    import os
-
     env_key = f"FLUX_RGBD_LOCAL_{filename.upper().replace('.', '_')}"
     override = os.environ.get(env_key)
     if override:
@@ -203,8 +204,8 @@ class Flux2Encoder(nn.Module):
         Args:
             resolution: The resolution of the input images.
             in_channels: The number of channels in the input images.
-            ch: The number of channels in the encoder.
-            ch_mult: The number of channels in the encoder at each resolution.
+            ch: The base channel count of the encoder.
+            ch_mult: The channel multipliers applied to `ch` at each resolution.
             num_res_blocks: The number of ResNet blocks in each downsampling block.
             z_channels: The number of channels in the latent space.
             repo_id: HuggingFace Hub repository id from which to load weights.
@@ -353,9 +354,9 @@ class Flux2Decoder(nn.Module):
         """Initialize the FLUX.2 decoder.
 
         Args:
-            ch: The number of channels in the decoder.
+            ch: The base channel count of the decoder.
             out_ch: The number of channels in the output.
-            ch_mult: The number of channels in the decoder at each resolution.
+            ch_mult: The channel multipliers applied to `ch` at each resolution.
             num_res_blocks: The number of ResNet blocks in each upsampling block.
             in_channels: The number of channels in the input images.
             resolution: The resolution of the input images.

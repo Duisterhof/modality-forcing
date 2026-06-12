@@ -68,10 +68,9 @@ def _ensure_runner() -> FluxRGBDRunner:
         res = int(os.environ.get("IMG_RESOLUTION", "512"))
         # Never compile on a Space: ZeroGPU runs each @spaces.GPU call in a
         # fresh process, which would recompile on every generation.
-        compile_model = os.environ.get("COMPILE") == "1" and not os.environ.get(
-            "SPACE_ID"
-        )
-        if os.environ.get("COMPILE") == "1" and not compile_model:
+        want_compile = os.environ.get("COMPILE") == "1"
+        compile_model = want_compile and not os.environ.get("SPACE_ID")
+        if want_compile and not compile_model:
             print(
                 "[boot] COMPILE=1 ignored: torch.compile is unsupported "
                 "on ZeroGPU Spaces.",
@@ -95,13 +94,14 @@ def _ensure_runner() -> FluxRGBDRunner:
     return _runner
 
 
-# --- helpers (kept inline so the Space repo doesn't depend on demo/app_lib) ---
-
-_SH_C0 = 0.28209479177387814
+# --- helpers (kept inline so the Space repo only needs app.py and flux_rgbd) ---
 
 
 def _letterbox(img: np.ndarray, target: int = 512):
-    """Resize so long side = target, then zero-pad to (target, target)."""
+    """Resize so long side = target, then zero-pad to (target, target).
+
+    Returns the canvas and the (top, left, h, w) box of the resized content.
+    """
     import cv2
 
     h_in, w_in = img.shape[:2]
@@ -124,14 +124,14 @@ def _letterbox(img: np.ndarray, target: int = 512):
 def _depth_to_pointcloud(
     rgb_u8, depth, *, fov_deg=65.0, max_points=1_200_000, edge_rtol=0.04, sor=False
 ):
+    """Back-project depth into a median-centered cloud; returns (points, colors)."""
     h, w = depth.shape
     fx = w / (2.0 * np.tan(np.deg2rad(fov_deg) / 2.0))
     cx, cy = w * 0.5, h * 0.5
-    # Keep every valid pixel -- no percentile clip. The earlier [1, 99] clip
-    # discarded the nearest 1% of points, carving a hole in the closest
-    # surface (e.g. the front edge of a table) and also dropping the far
-    # background. The i2d depth is clean enough that this clipping isn't
-    # needed and it was cutting off the geometry users care most about.
+    # Keep every valid pixel -- no percentile clip. Clipping to e.g. [1, 99]
+    # carves a hole in the closest surface (the geometry users care most
+    # about) and drops the far background; the i2d depth is clean enough
+    # that it isn't needed.
     valid = (depth > 0) & np.isfinite(depth)
     # Depth-edge mask: drop occlusion-boundary "veil" pixels (MoGe-style).
     if edge_rtol and edge_rtol > 0:
@@ -172,7 +172,7 @@ def _depth_to_magma(depth: np.ndarray) -> np.ndarray:
     """Depth -> magma-colormapped disparity image (uint8 RGB).
 
     Visualizes 1/depth (so near = bright) robustly normalized to the 5-95th
-    percentile, matching the depth panel in the reference notebook.
+    percentile.
     """
     from matplotlib import cm
 
@@ -189,7 +189,7 @@ def _depth_to_magma(depth: np.ndarray) -> np.ndarray:
 # Must live under tempfile.gettempdir(): Gradio only serves files from the
 # system temp dir (or cwd), and gettempdir() honors TMPDIR, which clusters
 # often point away from /tmp -- a hardcoded /tmp breaks serving there. On HF
-# Spaces it still resolves to /tmp, the writable mount. We write the PLY here
+# Spaces it still resolves to /tmp, the writable mount. We write the GLB here
 # from the parent process (i.e. NOT inside the @spaces.GPU subprocess) so
 # Gradio's file route can read it. Unique filename per call so Gradio's
 # content-hashed cache always serves fresh bytes.
@@ -226,12 +226,10 @@ def _sample_on_gpu(
     """GPU-only step: text encode + diffusion sample + VAE decode.
 
     Returns plain numpy arrays so the parent process (which is what
-    serves Gradio files) can do the rest. Writing the PLY here would
+    serves Gradio files) can do the rest. Writing the GLB here would
     leave it in the subprocess's filesystem view where the parent's
     Gradio file route can't find it (returns 404).
     """
-    import time
-
     runner = _ensure_runner()
     mode = "i2d" if input_image is not None else "joint"
 
@@ -296,8 +294,11 @@ def generate(
     edge_rtol: float = 0.04,
     sor: bool = False,
 ):
-    """Public Gradio handler. Runs the GPU step then does PLY writing
-    here in the parent process so the file persists for Gradio."""
+    """Public Gradio handler.
+
+    Runs the GPU step, then writes the GLB here in the parent process so
+    the file persists for Gradio.
+    """
     rgb_for_pc, depth, mode, elapsed = _sample_on_gpu(
         prompt,
         input_image,
@@ -330,21 +331,20 @@ def generate(
 
 
 # --- Presentation layer ----------------------------------------------------
-# Only the Gradio UI definition lives below. The generation/model code above
-# is untouched.
+# Only the Gradio UI definition lives below.
 
-WORLD_LABS_URL = "https://www.worldlabs.ai"
+_WORLD_LABS_URL = "https://www.worldlabs.ai"
 _PROJECT_URL = "https://modality-forcing.github.io/"
 _ARXIV_URL = "https://arxiv.org/abs/2606.13676"
 _CODE_URL = "https://github.com/Duisterhof/modality-forcing"
 
-# Editorial monochrome: a fully neutral palette, Inter for body, JetBrains
-# Mono for the small uppercase "eyebrow" labels. The serif display face for
-# the title (Gilda Display) is pulled in via @import in the CSS below.
+# Editorial monochrome: a fully neutral palette, the system UI stack for body
+# text, the system mono stack for the uppercase "eyebrow" labels. The serif
+# display face for the title (Gilda Display) is pulled in via @import in the
+# CSS below.
 _THEME = gr.themes.Default(
     # System fonts only -- no Google-fetched web fonts for the body/mono, which
-    # were loading unreliably (falling back to Arial and looking cheap). The
-    # serif display title uses Gilda Display, pulled in via @import in the CSS.
+    # were loading unreliably (falling back to Arial and looking cheap).
     font=(
         "system-ui",
         "-apple-system",
@@ -679,10 +679,30 @@ with gr.Blocks(title="Modality Forcing — World Labs") as demo:
 
     def _run_text_example(prompt_text):
         # Cached example runs pin the UI defaults so the cache stays valid.
-        return generate(prompt_text, None, 50, 4.0, 0, True, 5.0, 0.04, False)
+        return generate(
+            prompt_text,
+            None,
+            num_steps=50,
+            cfg_scale=4.0,
+            seed=0,
+            refine_depth=True,
+            log2_alpha=5.0,
+            edge_rtol=0.04,
+            sor=False,
+        )
 
     def _run_image_example(image):
-        return generate("", image, 50, 4.0, 0, True, 5.0, 0.04, False)
+        return generate(
+            "",
+            image,
+            num_steps=50,
+            cfg_scale=4.0,
+            seed=0,
+            refine_depth=True,
+            log2_alpha=5.0,
+            edge_rtol=0.04,
+            sor=False,
+        )
 
     # Defined after the output components exist, rendered back into the left
     # column. Cached: clicking an example serves precomputed results instead
@@ -711,7 +731,7 @@ with gr.Blocks(title="Modality Forcing — World Labs") as demo:
 
     gr.HTML(
         '<div class="mf-footer">'
-        '<div class="mf-cta">Built by <a href="' + WORLD_LABS_URL + '" '
+        f'<div class="mf-cta">Built by <a href="{_WORLD_LABS_URL}" '
         'target="_blank" rel="noopener noreferrer">World Labs</a></div>'
         '<div class="mf-credit">worldlabs.ai · Modality Forcing</div>'
         "</div>",

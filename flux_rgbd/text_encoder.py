@@ -27,7 +27,7 @@ DEFAULT_MODEL_SPEC = "Qwen/Qwen3-8B-FP8"
 
 
 class Qwen3Embedder(nn.Module):
-    """Wrap a Qwen3 causal LM, surface multi-layer hidden states.
+    """Wrap a Qwen3 causal LM and surface multi-layer hidden states.
 
     Inference-only. Chat-template policy matches the upstream FLUX.2
     [klein] recipe: user role, generation-prompt appended, thinking
@@ -44,7 +44,7 @@ class Qwen3Embedder(nn.Module):
     ) -> None:
         super().__init__()
         self.model_spec = model_spec
-        self.device_ = torch.device(device)
+        self._device = torch.device(device)
         self.max_length = max_length
         self.output_layers = tuple(output_layers)
 
@@ -53,14 +53,15 @@ class Qwen3Embedder(nn.Module):
         # transformers honor whatever the checkpoint advertises (FP8 for
         # the Qwen3-8B-FP8 we use by default).
         self._model = AutoModelForCausalLM.from_pretrained(
-            model_spec, dtype=None, device_map=str(self.device_)
+            model_spec, dtype=None, device_map=str(self._device)
         )
         self._model.eval()
-        self._pad_id = self._tokenizer.pad_token_id or 0
+        pad_id = self._tokenizer.pad_token_id
+        self._pad_id = 0 if pad_id is None else pad_id
 
     @staticmethod
-    def _apply_chat_template(tok, text: str) -> str:
-        return tok.apply_chat_template(
+    def _apply_chat_template(tokenizer, text: str) -> str:
+        return tokenizer.apply_chat_template(
             [{"role": "user", "content": text}],
             tokenize=False,
             add_generation_prompt=True,
@@ -88,7 +89,7 @@ class Qwen3Embedder(nn.Module):
             n = min(len(row), self.max_length)
             input_ids[i, :n] = torch.tensor(row[:n], dtype=torch.long)
             attn[i, :n] = 1
-        return input_ids.to(self.device_), attn.to(self.device_)
+        return input_ids.to(self._device), attn.to(self._device)
 
     @torch.inference_mode()
     def forward(self, prompts: list[str]) -> Tensor:

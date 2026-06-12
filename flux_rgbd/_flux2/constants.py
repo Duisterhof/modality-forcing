@@ -87,25 +87,7 @@ FLUX2_KLEIN_9B_PARAMS = MappingProxyType(
     }
 )
 """
-Immutable architecture configuration for FLUX.2 [klein]-9B model.
-
-This is a mid-size 9B parameter model that balances quality and speed. It uses
-Qwen3-8B as text encoder and provides higher quality than the 4B variant while
-maintaining fast 4-step inference. The model is guidance-distilled.
-
-Key architectural features:
-    - 24 single-stream transformer blocks (between 4B and dev)
-    - 4096 hidden dimensions with 32 attention heads
-    - No guidance embeddings (guidance-distilled into weights)
-    - Context dimension 12288 matches concatenated Qwen3-8B outputs
-
-Default generation parameters (distilled variants):
-    - guidance: 1.0 (fixed, baked into weights)
-    - num_steps: 4 (fixed)
-
-Base variant generation parameters:
-    - guidance: 4.0 (adjustable)
-    - num_steps: 50 (adjustable)
+Architecture config for FLUX.2 [klein] 9B parameter model (size distilled).
 """
 
 # =============================================================================
@@ -154,9 +136,6 @@ structured responses focusing on object relationships, object attribution and \
 actions without speculation."""
 """
 Default system message for text encoder when generating image descriptions.
-
-This system message is used for general-purpose text encoding tasks where the
-model needs to reason about images in a structured, factual manner.
 """
 
 SYSTEM_MESSAGE_UPSAMPLING_T2I = """You are an expert prompt engineer for FLUX.2 \
@@ -177,11 +156,6 @@ generates gibberish.
 Output only the revised prompt and nothing else."""
 """
 System message for text-to-image prompt upsampling.
-
-This prompt engineering template guides the text encoder to expand sparse user
-prompts into detailed, visually-rich descriptions that improve image generation
-quality. It emphasizes adding concrete visual details while preserving the
-original intent.
 """
 
 SYSTEM_MESSAGE_UPSAMPLING_I2I = """You are FLUX.2 by Black Forest Labs, an \
@@ -200,8 +174,4 @@ Rules:
 Output only the final instruction in plain text and nothing else."""
 """
 System message for image-to-image prompt upsampling.
-
-This prompt engineering template guides the text encoder to convert free-form
-image editing requests into concise, actionable instructions suitable for
-image-to-image generation tasks.
 """

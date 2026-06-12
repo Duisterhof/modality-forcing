@@ -47,8 +47,7 @@ def _load_local_or_hub(repo_id_or_path: str) -> tuple[Path, Path]:
 
 
 def _materialize_meta_tensors(model: torch.nn.Module, device) -> list[str]:
-    """Give a real (uninitialized) tensor to any parameter/buffer still on the
-    meta device after an ``assign=True`` load.
+    """Materialize tensors still on the meta device after an ``assign=True`` load.
 
     A meta-device build defers allocation until weights are assigned, so any
     tensor the checkpoint does *not* supply remains on `meta` and would crash
@@ -189,14 +188,14 @@ class FluxRGBDRunner:
         return self._encoder
 
     @torch.no_grad()
-    def encode_image(self, image_chw_uint8: np.ndarray) -> Tensor:
+    def encode_image(self, image_hwc_uint8: np.ndarray) -> Tensor:
         """uint8 (H, W, 3) image -> latent tokens (1, num_tokens, in_channels).
 
-        Resizes to ``self.img_hw`` and normalises to [-1, 1] before encoding.
+        Resizes to ``self.img_hw`` and normalizes to [-1, 1] before encoding.
         Output dtype matches the diffusion model's parameter dtype.
         """
         h, w = self.img_hw
-        rgb = cv2.resize(image_chw_uint8, (w, h), interpolation=cv2.INTER_AREA)
+        rgb = cv2.resize(image_hwc_uint8, (w, h), interpolation=cv2.INTER_AREA)
         x = torch.from_numpy(rgb).to(self.device).float() / 255.0  # (H, W, 3)
         x = x * 2 - 1  # [-1, 1]
         x = x.unsqueeze(0)  # (1, H, W, 3)
@@ -212,8 +211,8 @@ class FluxRGBDRunner:
         """(H, W) depth map -> depth-stream tokens (1, num_tokens, depth_channels).
 
         For ``mode="d2i"``. Resizes to ``self.img_hw`` then patchifies via the
-        same normalisation the model was trained with (see ``encode_depth``).
-        Because that normalisation is scale-invariant (``unit_mean``), the input
+        same normalization the model was trained with (see ``encode_depth``).
+        Because that normalization is scale-invariant (``unit_mean``), the input
         can be metric or relative depth. Output dtype matches the depth stream.
         """
         h, w = self.img_hw
@@ -260,8 +259,9 @@ class FluxRGBDRunner:
         i2d_cfg_scale: float = 1.0,
         log2_alpha: float | None = None,
     ) -> dict:
-        """Sample one (RGB, depth) pair from `prompt`. Returns a dict with:
+        """Sample one (RGB, depth) pair from `prompt`.
 
+        Returns a dict with:
             rgb:   (H, W, 3) uint8
             depth: (H, W)    float32 depth, relative scale (positive = farther)
             rgb_latent / depth_latent: raw model outputs (for debugging)
@@ -369,12 +369,12 @@ class FluxRGBDRunner:
             "_"
         )[:48]
         ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        d = Path(output_root) / f"{ts}_{slug}"
-        d.mkdir(parents=True, exist_ok=True)
+        run_dir = Path(output_root) / f"{ts}_{slug}"
+        run_dir.mkdir(parents=True, exist_ok=True)
 
         rgb, depth = result["rgb"], result["depth"]
-        cv2.imwrite(str(d / "rgb.png"), cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
-        np.save(d / "depth_raw.npy", depth)
+        cv2.imwrite(str(run_dir / "rgb.png"), cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        np.save(run_dir / "depth_raw.npy", depth)
 
         # Disparity (1/depth) magma, robustly normalized to the 5-95th
         # percentile so near surfaces read bright and far ones dark.
@@ -387,14 +387,14 @@ class FluxRGBDRunner:
             disparity[~valid] = 0.0
             magma = (cm.magma(disparity)[..., :3] * 255).astype(np.uint8)
             cv2.imwrite(
-                str(d / "depth_magma.png"), cv2.cvtColor(magma, cv2.COLOR_RGB2BGR)
+                str(run_dir / "depth_magma.png"), cv2.cvtColor(magma, cv2.COLOR_RGB2BGR)
             )
 
-        (d / "metadata.json").write_text(json.dumps(result["metadata"], indent=2))
+        (run_dir / "metadata.json").write_text(json.dumps(result["metadata"], indent=2))
         return {
-            "run_dir": str(d),
-            "rgb": str(d / "rgb.png"),
-            "depth_raw": str(d / "depth_raw.npy"),
-            "depth_magma": str(d / "depth_magma.png"),
-            "metadata": str(d / "metadata.json"),
+            "run_dir": str(run_dir),
+            "rgb": str(run_dir / "rgb.png"),
+            "depth_raw": str(run_dir / "depth_raw.npy"),
+            "depth_magma": str(run_dir / "depth_magma.png"),
+            "metadata": str(run_dir / "metadata.json"),
         }

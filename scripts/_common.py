@@ -40,7 +40,7 @@ DEFAULT_TEXT_ENCODER = "Qwen/Qwen3-8B"
 
 
 def add_shared_args(parser: argparse.ArgumentParser) -> None:
-    """Arguments common to every generation mode."""
+    """Add arguments common to every generation mode."""
     parser.add_argument("--prompt", required=True, help="Text prompt.")
     parser.add_argument(
         "--model",
@@ -84,10 +84,12 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
 
 
 def load_runner(args: argparse.Namespace) -> FluxRGBDRunner:
-    """Build the runner from parsed args. The DiT runs in bfloat16 (fp16
-    overflows to NaN in this model); the depth head is kept in fp32, which
-    avoids banding artifacts in the depth. The whole pipeline (sampling grid,
-    VAE, depth) runs at ``--resolution``."""
+    """Build the runner from parsed args.
+
+    The DiT runs in bfloat16 (fp16 overflows to NaN in this model); the depth
+    head is kept in fp32, which avoids banding artifacts in the depth. The
+    whole pipeline (sampling grid, VAE, depth) runs at ``--resolution``.
+    """
     res = int(getattr(args, "resolution", 512))
     if res % 16 != 0:
         raise ValueError(f"--resolution must be a multiple of 16; got {res}")
@@ -165,7 +167,7 @@ def write_point_cloud(
 
     Writes ``out_path`` (GLB, for 3D viewers) and a sibling ``.ply`` (for
     point-cloud tools). Returns ``(num_points, [glb_path, ply_path])``. Assumes
-    a centered pinhole camera with the given vertical field of view.
+    a centered pinhole camera with the given horizontal field of view.
     ``edge_rtol`` drops depth-edge (occlusion-boundary) pixels before
     back-projection; 0 disables it.
     """
@@ -175,7 +177,7 @@ def write_point_cloud(
     fx = w / (2.0 * np.tan(np.deg2rad(fov_deg) / 2.0))
     cx, cy = w * 0.5, h * 0.5
     valid = (depth > 0) & np.isfinite(depth)
-    if edge_rtol and edge_rtol > 0:
+    if edge_rtol > 0:
         valid &= ~depth_edge_mask(depth, rtol=edge_rtol)
     v_idx, u_idx = np.where(valid)
     z = depth[v_idx, u_idx]
@@ -199,7 +201,7 @@ def write_point_cloud(
     glb_path = str(out_path)
     scene = trimesh.Scene()
     scene.add_geometry(cloud)
-    scene.export(glb_path)  # GLB for 3D viewers
+    scene.export(glb_path)
     ply_path = str(Path(out_path).with_suffix(".ply"))
-    cloud.export(ply_path)  # PLY for point-cloud tools
+    cloud.export(ply_path)
     return int(pts.shape[0]), [glb_path, ply_path]

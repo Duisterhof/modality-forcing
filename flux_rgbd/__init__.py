@@ -11,4 +11,4 @@ def __getattr__(name):
         from flux_rgbd.runner import FluxRGBDRunner
 
         return FluxRGBDRunner
-    raise AttributeError(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

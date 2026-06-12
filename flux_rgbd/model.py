@@ -96,6 +96,14 @@ class FluxRGBD(nn.Module):
         null_text_embed: Tensor | None = None,
         log2_alpha: float | None = None,
     ) -> tuple[Tensor, Tensor]:
+        """N-step Euler rollout; returns the final (rgb, depth) latent tokens.
+
+        `mode` picks what is denoised: "joint" denoises both, "i2d" freezes
+        `clean_rgb` and denoises depth, "d2i" freezes `clean_depth` and
+        denoises RGB. CFG runs when `cfg_scale` > 1.0, against
+        `null_text_embed` (zeros_like(ctx) if omitted). `*_use_x_prediction`
+        converts x-prediction outputs to velocities before each Euler step.
+        """
         if mode == "i2d" and clean_rgb is None:
             raise ValueError("clean_rgb is required for mode='i2d'")
         if mode == "d2i" and clean_depth is None:
@@ -123,7 +131,8 @@ class FluxRGBD(nn.Module):
             rgb = randn(batch, num_tokens, self.in_channels)
             depth = randn(batch, num_tokens, self.depth_channels)
 
-        schedule_config = schedule_config or ScheduleConfig()
+        if schedule_config is None:
+            schedule_config = ScheduleConfig()
         t_rgb_sched, t_depth_sched = rollout_timesteps(
             schedule_config,
             num_steps,
