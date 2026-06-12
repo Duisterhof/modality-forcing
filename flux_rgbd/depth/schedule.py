@@ -11,9 +11,9 @@ so larger mu pushes the schedule toward noisier (later) timesteps.
 
 In asymmetric modes one stream is held at the boundary of its noise
 range:
-  "joint" — both schedules are warped linear walks.
-  "i2d"   — RGB held at t = 0 (clean RGB conditioning).
-  "d2i"   — depth held at t = 0; RGB optionally held at t = 1.
+  "joint" -- both schedules are warped linear walks.
+  "i2d"   -- RGB held at t = 0 (clean RGB conditioning).
+  "d2i"   -- depth held at t = 0; RGB optionally held at t = 1.
 """
 
 from __future__ import annotations
@@ -44,23 +44,32 @@ def _shift(mu: float, sigma: float, t: Tensor) -> Tensor:
 
 
 def _f_alpha(t: Tensor, alpha: float) -> Tensor:
-    """Latent-forcing Möbius warp f_α(t) = αt / (1 + (α-1)t). Fixes 0 and 1."""
+    """Latent-forcing Möbius warp f(t) = alpha*t / (1 + (alpha-1)*t).
+
+    Fixes 0 and 1.
+    """
     return (alpha * t) / (1.0 + (alpha - 1.0) * t)
 
 
-def rollout_timesteps(config: ScheduleConfig, num_steps: int, *,
-                      mode: Mode = "joint",
-                      log2_alpha: float | None = None,
-                      t_max: float = 1.0, t_min: float = 0.0,
-                      device: torch.device | str | None = None,
-                      dtype: torch.dtype = torch.float32) -> tuple[Tensor, Tensor]:
+def rollout_timesteps(
+    config: ScheduleConfig,
+    num_steps: int,
+    *,
+    mode: Mode = "joint",
+    log2_alpha: float | None = None,
+    t_max: float = 1.0,
+    t_min: float = 0.0,
+    device: torch.device | str | None = None,
+    dtype: torch.dtype = torch.float32,
+) -> tuple[Tensor, Tensor]:
     """Return per-modality timestep tensors of shape `(num_steps + 1,)`.
 
     ``log2_alpha`` (joint mode only) tilts the RGB/depth denoising trajectory:
-    the depth schedule becomes ``f_α(t_rgb)`` with ``α = 2 ** log2_alpha`` on top
-    of the training time-shift density. ``α > 1`` keeps depth noisier for longer
-    so RGB resolves first (rgb-first → cleaner depth); ``α < 1`` is depth-first;
-    ``α = 1`` (or ``None``) is the diagonal joint schedule.
+    the depth schedule becomes ``f_alpha(t_rgb)`` with ``alpha = 2 **
+    log2_alpha`` on top of the training time-shift density. ``alpha > 1``
+    keeps depth noisier for longer so RGB resolves first (rgb-first ->
+    cleaner depth); ``alpha < 1`` is depth-first; ``alpha = 1`` (or ``None``)
+    is the diagonal joint schedule.
     """
     if num_steps < 1:
         raise ValueError(f"num_steps must be >= 1; got {num_steps}")
@@ -80,7 +89,7 @@ def rollout_timesteps(config: ScheduleConfig, num_steps: int, *,
             # Warp the depth schedule off the (time-shifted) RGB grid, matching
             # the final-paper time-shift trajectory: nodes follow the training
             # sigmoid density, then the Möbius warp tilts depth vs RGB.
-            t_depth = _f_alpha(t_rgb, 2.0 ** log2_alpha)
+            t_depth = _f_alpha(t_rgb, 2.0**log2_alpha)
     else:
         raise ValueError(f"unknown mode {mode!r}; expected joint / i2d / d2i")
 

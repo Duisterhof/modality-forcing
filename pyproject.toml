@@ -115,6 +115,11 @@ build-backend = "uv_build"
 module-name = "flux_rgbd"
 module-root = ""
 
+[tool.ruff]
+line-length = 88
+
 [tool.ruff.lint]
-# jaxtyping shape annotations (Float[Tensor, "b c h w"]) trip F722.
-ignore = ["F722"]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "F722", # jaxtyping shape annotations (Float[Tensor, "b c h w"])
+]

@@ -11,7 +11,7 @@ the FLUX.2 [klein] recipe). Output shape is
 Pads to the full ``MAX_LENGTH`` (no stripping) because the FLUX.2 DiT was
 trained against the padded text stream produced by Black Forest Labs.
 
-Loads everything from HuggingFace Hub — no internal mirrors, no auth.
+Loads everything from HuggingFace Hub -- no internal mirrors, no auth.
 """
 
 from __future__ import annotations

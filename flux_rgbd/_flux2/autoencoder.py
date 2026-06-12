@@ -28,11 +28,11 @@ from jaxtyping import Float
 from safetensors.torch import load_file as load_safetensors
 from torch import Tensor, nn
 
-__all__ = ["Flux2Encoder", "Flux2Decoder"]
+__all__ = ["Flux2Decoder", "Flux2Encoder"]
 
 # FLUX.2-dev autoencoder weights, pre-split into encoder + decoder
 # safetensors. (BFL's canonical `ae.safetensors` is a combined file
-# we'd have to filter by key prefix — easier to host the split files
+# we'd have to filter by key prefix -- easier to host the split files
 # inside the model repo. Override via the FLUX_RGBD_LOCAL_AE_{...}
 # env vars if you want to skip the Hub fetch entirely.)
 DEFAULT_AE_REPO = "bartduis/modality_forcing"
@@ -61,6 +61,7 @@ def _load_weights(repo_id: str, filename: str) -> dict[str, Tensor]:
     # Allow callers to point at a local file via env var. Useful for tests
     # and air-gapped environments.
     import os
+
     env_key = f"FLUX_RGBD_LOCAL_{filename.upper().replace('.', '_')}"
     override = os.environ.get(env_key)
     if override:
@@ -225,7 +226,7 @@ class Flux2Encoder(nn.Module):
         )
 
         curr_res = resolution
-        in_ch_mult = (1,) + tuple(ch_mult)
+        in_ch_mult = (1, *tuple(ch_mult))
         self.in_ch_mult = in_ch_mult
         self.down = nn.ModuleList()
         block_in = self.ch

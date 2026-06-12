@@ -7,8 +7,9 @@ from __future__ import annotations
 import numpy as np
 
 
-def statistical_outlier_mask(points: np.ndarray, *, num_neighbors: int = 5,
-                             std_ratio: float = 1.0) -> np.ndarray:
+def statistical_outlier_mask(
+    points: np.ndarray, *, num_neighbors: int = 5, std_ratio: float = 1.0
+) -> np.ndarray:
     """Boolean inlier mask via statistical outlier rejection.
 
     For each point, the mean distance to its ``num_neighbors`` nearest
@@ -30,6 +31,7 @@ def statistical_outlier_mask(points: np.ndarray, *, num_neighbors: int = 5,
         return np.ones(n, dtype=bool)
     # Lazy import: only point-cloud export needs scipy.
     from scipy.spatial import cKDTree
+
     tree = cKDTree(points)
     # k + 1: the nearest neighbour is the point itself (distance 0); drop it.
     dists, _ = tree.query(points, k=num_neighbors + 1, workers=-1)
@@ -38,18 +40,21 @@ def statistical_outlier_mask(points: np.ndarray, *, num_neighbors: int = 5,
     return mean_dist <= threshold
 
 
-def depth_edge_mask(depth: np.ndarray, *, rtol: float = 0.04,
-                    kernel_size: int = 3) -> np.ndarray:
+def depth_edge_mask(
+    depth: np.ndarray, *, rtol: float = 0.04, kernel_size: int = 3
+) -> np.ndarray:
     """Boolean mask, ``True`` on depth-discontinuity pixels.
 
-    A pixel is an edge when the local depth range (max − min over a
+    A pixel is an edge when the local depth range (max - min over a
     ``kernel_size`` window) exceeds ``rtol`` of its depth. Removing these
     pixels *before* back-projection deletes the occlusion-boundary "veils"
-    that bridge foreground→background — the connected floaters that
+    that bridge foreground->background -- the connected floaters that
     statistical outlier rejection cannot catch (they have close neighbours).
     Mirrors MoGe / utils3d ``depth_edge`` (``rtol`` path).
     """
     from scipy.ndimage import maximum_filter, minimum_filter
-    local_range = (maximum_filter(depth, size=kernel_size)
-                   - minimum_filter(depth, size=kernel_size))
+
+    local_range = maximum_filter(depth, size=kernel_size) - minimum_filter(
+        depth, size=kernel_size
+    )
     return local_range > rtol * np.maximum(depth, 1e-6)

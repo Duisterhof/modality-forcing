@@ -15,13 +15,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""FluxRGBDDiT — FLUX.2 dual+single-stream transformer extended for joint RGB+depth.
+"""FluxRGBDDiT -- FLUX.2 dual+single-stream transformer extended for joint RGB+depth.
 
 Derived from the FLUX.2 reference implementation:
     https://github.com/black-forest-labs/flux2
 
 Architecture, inference-only:
-  * Depth is a peer stream alongside image and text — each gets its own
+  * Depth is a peer stream alongside image and text -- each gets its own
     pre-norm, Q/K/V, MLP inside every dual-stream block. Joint attention
     runs over the concatenated `[txt, img, depth]` sequence.
   * 8 dual-stream blocks + 24 single-stream blocks (FLUX.2 backbone).
@@ -64,29 +64,53 @@ class _TripleStreamBlock(nn.Module):
     def __init__(self, hidden_size: int, num_heads: int, mlp_ratio: float):
         super().__init__()
         if hidden_size % num_heads != 0:
-            raise ValueError(f"hidden_size {hidden_size} not divisible by num_heads {num_heads}")
+            raise ValueError(
+                f"hidden_size {hidden_size} not divisible by num_heads {num_heads}"
+            )
         mlp_hidden = int(hidden_size * mlp_ratio)
         self.num_heads = num_heads
 
         # Same shapes per stream: pre-norm + (Q,K,V,proj) + post-norm + 2-up SiLU MLP.
-        # The `* 2` in the first Linear is the gated-SiLU activation packing FLUX.2 uses.
+        # The `* 2` in the first Linear is FLUX.2's gated-SiLU activation packing.
         for prefix in ("img", "txt", "depth"):
-            setattr(self, f"{prefix}_norm1", nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6))
-            setattr(self, f"{prefix}_attn", SelfAttention(dim=hidden_size, num_heads=num_heads))
-            setattr(self, f"{prefix}_norm2", nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6))
-            setattr(self, f"{prefix}_mlp", nn.Sequential(
-                nn.Linear(hidden_size, mlp_hidden * 2, bias=False),
-                SiLUActivation(),
-                nn.Linear(mlp_hidden, hidden_size, bias=False),
-            ))
+            setattr(
+                self,
+                f"{prefix}_norm1",
+                nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6),
+            )
+            setattr(
+                self,
+                f"{prefix}_attn",
+                SelfAttention(dim=hidden_size, num_heads=num_heads),
+            )
+            setattr(
+                self,
+                f"{prefix}_norm2",
+                nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6),
+            )
+            setattr(
+                self,
+                f"{prefix}_mlp",
+                nn.Sequential(
+                    nn.Linear(hidden_size, mlp_hidden * 2, bias=False),
+                    SiLUActivation(),
+                    nn.Linear(mlp_hidden, hidden_size, bias=False),
+                ),
+            )
 
-    def _qkv(self, x: Tensor, norm: nn.LayerNorm, attn: SelfAttention,
-             mod1: tuple[Tensor, Tensor, Tensor]):
+    def _qkv(
+        self,
+        x: Tensor,
+        norm: nn.LayerNorm,
+        attn: SelfAttention,
+        mod1: tuple[Tensor, Tensor, Tensor],
+    ):
         """Pre-norm + AdaLN + Q/K/V projection. Returns (q, k, v, gate)."""
         shift, scale, gate = mod1
         qkv = attn.qkv((1 + scale) * norm(x) + shift)
-        q, k, v = einops.rearrange(qkv, "B L (K H D) -> K B H L D",
-                                   K=3, H=self.num_heads)
+        q, k, v = einops.rearrange(
+            qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads
+        )
         q, k = attn.norm(q, k, v)
         return q, k, v, gate
 
@@ -97,11 +121,18 @@ class _TripleStreamBlock(nn.Module):
         shift, scale, gate2 = mod2
         return x + gate2 * mlp((1 + scale) * norm2(x) + shift)
 
-    def forward(self, img, txt, depth, pe_img, pe_txt, pe_depth,
-                mod_img, mod_txt, mod_depth):
-        q_img, k_img, v_img, g_img = self._qkv(img,   self.img_norm1,   self.img_attn,   mod_img[0])
-        q_txt, k_txt, v_txt, g_txt = self._qkv(txt,   self.txt_norm1,   self.txt_attn,   mod_txt[0])
-        q_d,   k_d,   v_d,   g_d   = self._qkv(depth, self.depth_norm1, self.depth_attn, mod_depth[0])
+    def forward(
+        self, img, txt, depth, pe_img, pe_txt, pe_depth, mod_img, mod_txt, mod_depth
+    ):
+        q_img, k_img, v_img, g_img = self._qkv(
+            img, self.img_norm1, self.img_attn, mod_img[0]
+        )
+        q_txt, k_txt, v_txt, g_txt = self._qkv(
+            txt, self.txt_norm1, self.txt_attn, mod_txt[0]
+        )
+        q_d, k_d, v_d, g_d = self._qkv(
+            depth, self.depth_norm1, self.depth_attn, mod_depth[0]
+        )
 
         # Joint attention over [txt, img, depth]; BFL's `attention` does
         # RoPE + scaled_dot_product_attention + rearrange.
@@ -116,25 +147,48 @@ class _TripleStreamBlock(nn.Module):
         img_out = out[:, n_txt : n_txt + n_img]
         depth_out = out[:, n_txt + n_img :]
 
-        img = self._residual(img, img_out, self.img_attn.proj, g_img,
-                             mod_img[1], self.img_norm2, self.img_mlp)
-        txt = self._residual(txt, txt_out, self.txt_attn.proj, g_txt,
-                             mod_txt[1], self.txt_norm2, self.txt_mlp)
-        depth = self._residual(depth, depth_out, self.depth_attn.proj, g_d,
-                               mod_depth[1], self.depth_norm2, self.depth_mlp)
+        img = self._residual(
+            img,
+            img_out,
+            self.img_attn.proj,
+            g_img,
+            mod_img[1],
+            self.img_norm2,
+            self.img_mlp,
+        )
+        txt = self._residual(
+            txt,
+            txt_out,
+            self.txt_attn.proj,
+            g_txt,
+            mod_txt[1],
+            self.txt_norm2,
+            self.txt_mlp,
+        )
+        depth = self._residual(
+            depth,
+            depth_out,
+            self.depth_attn.proj,
+            g_d,
+            mod_depth[1],
+            self.depth_norm2,
+            self.depth_mlp,
+        )
         return img, txt, depth
 
 
 def _stack_per_token_mod(
     mod_img: tuple[Tensor, Tensor, Tensor],
     mod_depth: tuple[Tensor, Tensor, Tensor],
-    n_txt: int, n_img: int, n_depth: int,
+    n_txt: int,
+    n_img: int,
+    n_depth: int,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Build the per-token modulation triple consumed by SingleStreamBlock.
 
     Each ``Modulation`` output is broadcast over the sequence axis. For the
     triple-stream single stack we need different (shift, scale, gate) for
-    the depth tokens vs the txt+img tokens — so we expand each entry along
+    the depth tokens vs the txt+img tokens -- so we expand each entry along
     seq and ``cat``.
     """
     n_txt_img = n_txt + n_img
@@ -151,12 +205,12 @@ class FluxRGBDDiT(nn.Module):
     """FLUX.2 Klein-9B DiT with peer depth stream.
 
     Forward: (img, depth, text, RGB timestep, depth timestep, *_ids)
-    → (rgb_latent_out, depth_latent_out).
+    -> (rgb_latent_out, depth_latent_out).
 
     Architecture (v1 defaults match the published checkpoint):
-        depth_double=8 triple-stream blocks  →  full-token concat  →
-        depth_single=24 single-stream blocks  →  split  →
-        depth_decoder_num_layers=4 single blocks over depth only  →
+        depth_double=8 triple-stream blocks  ->  full-token concat  ->
+        depth_single=24 single-stream blocks  ->  split  ->
+        depth_decoder_num_layers=4 single blocks over depth only  ->
         final_layer / depth_final_layer.
     """
 
@@ -238,15 +292,19 @@ class FluxRGBDDiT(nn.Module):
 
         # Dual-stream stack.
         self.double_blocks = nn.ModuleList(
-            [_TripleStreamBlock(hidden_size, num_heads, mlp_ratio)
-             for _ in range(depth_double)]
+            [
+                _TripleStreamBlock(hidden_size, num_heads, mlp_ratio)
+                for _ in range(depth_double)
+            ]
         )
 
-        # Single-stream stack — reuses the FLUX.2 SingleStreamBlock with
+        # Single-stream stack -- reuses the FLUX.2 SingleStreamBlock with
         # per-token modulation built on the fly.
         self.single_blocks = nn.ModuleList(
-            [SingleStreamBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
-             for _ in range(depth_single)]
+            [
+                SingleStreamBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
+                for _ in range(depth_single)
+            ]
         )
 
         # Modulation heads.
@@ -269,8 +327,10 @@ class FluxRGBDDiT(nn.Module):
         # Optional depth-only decoder stack (4 SingleStreamBlocks for v1).
         if depth_decoder_num_layers > 0:
             self.depth_decoder_blocks = nn.ModuleList(
-                [SingleStreamBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
-                 for _ in range(depth_decoder_num_layers)]
+                [
+                    SingleStreamBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
+                    for _ in range(depth_decoder_num_layers)
+                ]
             )
             self.depth_decoder_modulation = Modulation(
                 hidden_size, double=False, disable_bias=True
@@ -365,9 +425,15 @@ class FluxRGBDDiT(nn.Module):
         # Dual-stream stack.
         for block in self.double_blocks:
             img, txt, depth = block(
-                img, txt, depth,
-                pe_img, pe_txt, pe_depth,
-                mod_img_double, mod_txt_double, mod_depth_double,
+                img,
+                txt,
+                depth,
+                pe_img,
+                pe_txt,
+                pe_depth,
+                mod_img_double,
+                mod_txt_double,
+                mod_depth_double,
             )
 
         # Single-stream stack over the concatenated [txt, img, depth] sequence

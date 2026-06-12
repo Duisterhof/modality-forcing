@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 World Labs.
-"""FluxRGBD — pairs the depth-extended DiT with a joint flow-matching sampler.
+"""FluxRGBD -- pairs the depth-extended DiT with a joint flow-matching sampler.
 
 Public surface:
-  * `model.forward(...)` — one denoiser call.
-  * `model.sample(...)`  — N-step Euler rollout over RGB + depth. Three
-    modes: `"joint"` (text → RGBD), `"i2d"` (text+RGB → depth),
-    `"d2i"` (text+depth → RGB).
+  * `model.forward(...)` -- one denoiser call.
+  * `model.sample(...)`  -- N-step Euler rollout over RGB + depth. Three
+    modes: `"joint"` (text -> RGBD), `"i2d"` (text+RGB -> depth),
+    `"d2i"` (text+depth -> RGB).
 """
 
 from __future__ import annotations
@@ -47,8 +47,17 @@ class FluxRGBD(nn.Module):
 
     # ----------------------------------------------------------------- step
 
-    def forward(self, img, timesteps, ctx, img_height, img_width,
-                depth, depth_timesteps, guidance=None):
+    def forward(
+        self,
+        img,
+        timesteps,
+        ctx,
+        img_height,
+        img_width,
+        depth,
+        depth_timesteps,
+        guidance=None,
+    ):
         b, device = img.shape[0], img.device
         return self.dit(
             img=img,
@@ -57,7 +66,9 @@ class FluxRGBD(nn.Module):
             ctx=ctx,
             ctx_ids=self._txt_ids(b, ctx.shape[1], device=device),
             depth=depth,
-            depth_ids=self._img_ids(b, img_height, img_width, device=device, time_id=1.0),
+            depth_ids=self._img_ids(
+                b, img_height, img_width, device=device, time_id=1.0
+            ),
             depth_timesteps=depth_timesteps,
             guidance=guidance,
         )
@@ -65,18 +76,26 @@ class FluxRGBD(nn.Module):
     # --------------------------------------------------------------- sample
 
     @torch.no_grad()
-    def sample(self, *, ctx: Tensor, img_height: int, img_width: int,
-               num_steps: int = 50, mode: Mode = "joint",
-               schedule_config: ScheduleConfig | None = None,
-               cfg_scale: float = 1.0, guidance: float = 1.0,
-               seed: int | None = None,
-               rgb_use_x_prediction: bool = False,
-               depth_use_x_prediction: bool = True,
-               x_prediction_t_min: float = 0.05,
-               clean_rgb: Tensor | None = None,
-               clean_depth: Tensor | None = None,
-               null_text_embed: Tensor | None = None,
-               log2_alpha: float | None = None) -> tuple[Tensor, Tensor]:
+    def sample(
+        self,
+        *,
+        ctx: Tensor,
+        img_height: int,
+        img_width: int,
+        num_steps: int = 50,
+        mode: Mode = "joint",
+        schedule_config: ScheduleConfig | None = None,
+        cfg_scale: float = 1.0,
+        guidance: float = 1.0,
+        seed: int | None = None,
+        rgb_use_x_prediction: bool = False,
+        depth_use_x_prediction: bool = True,
+        x_prediction_t_min: float = 0.05,
+        clean_rgb: Tensor | None = None,
+        clean_depth: Tensor | None = None,
+        null_text_embed: Tensor | None = None,
+        log2_alpha: float | None = None,
+    ) -> tuple[Tensor, Tensor]:
         if mode == "i2d" and clean_rgb is None:
             raise ValueError("clean_rgb is required for mode='i2d'")
         if mode == "d2i" and clean_depth is None:
@@ -85,7 +104,11 @@ class FluxRGBD(nn.Module):
         device, dtype, batch = ctx.device, ctx.dtype, ctx.shape[0]
         num_tokens = img_height * img_width
 
-        gen = torch.Generator(device=device).manual_seed(seed) if seed is not None else None
+        gen = (
+            torch.Generator(device=device).manual_seed(seed)
+            if seed is not None
+            else None
+        )
 
         def randn(*shape):
             return torch.randn(*shape, device=device, dtype=dtype, generator=gen)
@@ -102,16 +125,27 @@ class FluxRGBD(nn.Module):
 
         schedule_config = schedule_config or ScheduleConfig()
         t_rgb_sched, t_depth_sched = rollout_timesteps(
-            schedule_config, num_steps, mode=mode, log2_alpha=log2_alpha,
-            device=device, dtype=dtype,
+            schedule_config,
+            num_steps,
+            mode=mode,
+            log2_alpha=log2_alpha,
+            device=device,
+            dtype=dtype,
         )
 
-        guidance_tensor = (torch.full((batch,), guidance, device=device, dtype=dtype)
-                           if self.dit.use_guidance_embed else None)
+        guidance_tensor = (
+            torch.full((batch,), guidance, device=device, dtype=dtype)
+            if self.dit.use_guidance_embed
+            else None
+        )
 
         use_cfg = cfg_scale > 1.0
         if use_cfg:
-            uncond = null_text_embed if null_text_embed is not None else torch.zeros_like(ctx)
+            uncond = (
+                null_text_embed
+                if null_text_embed is not None
+                else torch.zeros_like(ctx)
+            )
             if uncond.ndim == 2:
                 uncond = uncond.unsqueeze(0)
             if uncond.shape[0] == 1 and batch > 1:
@@ -125,23 +159,33 @@ class FluxRGBD(nn.Module):
             dt_depth = t_depth_sched[step + 1] - t_depth_sched[step]
 
             pred_rgb, pred_depth = self.forward(
-                img=rgb, timesteps=t_rgb_b, ctx=ctx,
-                img_height=img_height, img_width=img_width,
-                depth=depth, depth_timesteps=t_depth_b, guidance=guidance_tensor,
+                img=rgb,
+                timesteps=t_rgb_b,
+                ctx=ctx,
+                img_height=img_height,
+                img_width=img_width,
+                depth=depth,
+                depth_timesteps=t_depth_b,
+                guidance=guidance_tensor,
             )
             if use_cfg:
                 # The uncond CUDA-graph replay below overwrites these output
-                # buffers (torch.compile reduce-overhead) — clone before reuse.
+                # buffers (torch.compile reduce-overhead) -- clone before reuse.
                 pred_rgb, pred_depth = pred_rgb.clone(), pred_depth.clone()
                 pred_rgb_u, pred_depth_u = self.forward(
-                    img=rgb, timesteps=t_rgb_b, ctx=uncond,
-                    img_height=img_height, img_width=img_width,
-                    depth=depth, depth_timesteps=t_depth_b, guidance=guidance_tensor,
+                    img=rgb,
+                    timesteps=t_rgb_b,
+                    ctx=uncond,
+                    img_height=img_height,
+                    img_width=img_width,
+                    depth=depth,
+                    depth_timesteps=t_depth_b,
+                    guidance=guidance_tensor,
                 )
                 pred_rgb = pred_rgb_u + cfg_scale * (pred_rgb - pred_rgb_u)
                 pred_depth = pred_depth_u + cfg_scale * (pred_depth - pred_depth_u)
 
-            # x-prediction → velocity: when the head was trained to predict
+            # x-prediction -> velocity: when the head was trained to predict
             # the clean x rather than the velocity, convert it before Euler.
             if rgb_use_x_prediction:
                 clamp = t_rgb_b.view(batch, 1, 1).clamp(min=x_prediction_t_min)

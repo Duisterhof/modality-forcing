@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 World Labs.
-"""Depth-side decoding: model tokens → depth pixel map.
+"""Depth-side decoding: model tokens -> depth pixel map.
 
 Decoding steps:
   1. Unpatchify the (tok_h, tok_w, patch_h * patch_w) token grid.
@@ -8,7 +8,7 @@ Decoding steps:
   3. Apply the inverse of every recorded normalization stage, in reverse.
 
 Only `"contract"` (the mip-NeRF 360 radial squash, arXiv 2111.12077
-Eq. 10) is genuinely invertible — the other stages discard per-sample
+Eq. 10) is genuinely invertible -- the other stages discard per-sample
 statistics during encoding and pass through unchanged on decode.
 """
 
@@ -37,9 +37,13 @@ class DepthConfig:
             object.__setattr__(self, "depth_normalize_mode", (stages,))
         unknown = set(self.depth_normalize_mode) - _KNOWN_STAGES
         if unknown:
-            raise ValueError(f"unknown stages {sorted(unknown)}; expected {sorted(_KNOWN_STAGES)}")
+            raise ValueError(
+                f"unknown stages {sorted(unknown)}; expected {sorted(_KNOWN_STAGES)}"
+            )
         if self.depth_value_scale <= 0:
-            raise ValueError(f"depth_value_scale must be > 0; got {self.depth_value_scale}")
+            raise ValueError(
+                f"depth_value_scale must be > 0; got {self.depth_value_scale}"
+            )
         if self.patch_size <= 0:
             raise ValueError(f"patch_size must be > 0; got {self.patch_size}")
 
@@ -69,7 +73,9 @@ def decode_depth(tokens: Tensor, config: DepthConfig) -> Tensor:
     Output shape: (..., tok_h * patch_size, tok_w * patch_size, 1)
     """
     p = config.patch_size
-    depth = einops.rearrange(tokens, "... h w (p1 p2 c) -> ... (h p1) (w p2) c", p1=p, p2=p)
+    depth = einops.rearrange(
+        tokens, "... h w (p1 p2 c) -> ... (h p1) (w p2) c", p1=p, p2=p
+    )
     if config.depth_value_scale != 1.0:
         depth = depth / config.depth_value_scale
     for stage in reversed(config.depth_normalize_mode):
@@ -112,7 +118,7 @@ def encode_depth(depth_map: Tensor, config: DepthConfig) -> Tensor:
 
     Used for ``mode="d2i"`` to turn a depth map into the depth-stream tokens
     the model conditions on. Because `unit_mean` is scale-normalising, only the
-    relative depth structure matters — the input need not be metric.
+    relative depth structure matters -- the input need not be metric.
     """
     p = config.patch_size
     depth = depth_map
@@ -120,4 +126,6 @@ def encode_depth(depth_map: Tensor, config: DepthConfig) -> Tensor:
         depth = _apply_stage(depth, stage)
     if config.depth_value_scale != 1.0:
         depth = depth * config.depth_value_scale
-    return einops.rearrange(depth, "... (h p1) (w p2) c -> ... h w (p1 p2 c)", p1=p, p2=p)
+    return einops.rearrange(
+        depth, "... (h p1) (w p2) c -> ... h w (p1 p2 c)", p1=p, p2=p
+    )

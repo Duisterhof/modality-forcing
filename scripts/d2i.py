@@ -18,26 +18,38 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts._common import (  # noqa: E402
-    add_shared_args, load_runner, read_depth_map,
+from scripts._common import (
+    add_shared_args,
+    load_runner,
+    read_depth_map,
 )
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Text + depth -> RGB (d2i mode).")
     add_shared_args(p)
-    p.add_argument("--depth", required=True,
-                   help="Path to the input depth map (.npy or 16-bit PNG/TIFF).")
-    p.add_argument("--cfg-scale", type=float, default=4.0,
-                   help="Classifier-free guidance scale for the RGB stream.")
+    p.add_argument(
+        "--depth",
+        required=True,
+        help="Path to the input depth map (.npy or 16-bit PNG/TIFF).",
+    )
+    p.add_argument(
+        "--cfg-scale",
+        type=float,
+        default=4.0,
+        help="Classifier-free guidance scale for the RGB stream.",
+    )
     args = p.parse_args()
 
     depth_map = read_depth_map(args.depth)
     runner = load_runner(args)
     depth_tokens = runner.encode_depth_map(depth_map)
     result = runner.generate(
-        args.prompt, mode="d2i",
-        num_steps=args.num_steps, cfg_scale=args.cfg_scale, seed=args.seed,
+        args.prompt,
+        mode="d2i",
+        num_steps=args.num_steps,
+        cfg_scale=args.cfg_scale,
+        seed=args.seed,
         clean_depth=depth_tokens,
     )
 

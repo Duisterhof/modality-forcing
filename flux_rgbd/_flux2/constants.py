@@ -23,13 +23,13 @@ __all__ = [
     "FLUX2_DEV_PARAMS",
     "FLUX2_KLEIN_4B_PARAMS",
     "FLUX2_KLEIN_9B_PARAMS",
+    "MAX_LENGTH",
     "OUTPUT_LAYERS_MISTRAL",
     "OUTPUT_LAYERS_QWEN3",
-    "MAX_LENGTH",
-    "UPSAMPLING_MAX_IMAGE_SIZE",
     "SYSTEM_MESSAGE",
-    "SYSTEM_MESSAGE_UPSAMPLING_T2I",
     "SYSTEM_MESSAGE_UPSAMPLING_I2I",
+    "SYSTEM_MESSAGE_UPSAMPLING_T2I",
+    "UPSAMPLING_MAX_IMAGE_SIZE",
 ]
 
 # =============================================================================

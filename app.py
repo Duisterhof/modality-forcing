@@ -16,10 +16,11 @@ import uuid
 from pathlib import Path
 
 # Persistent torch.compile kernel cache. Must be set before torch/transformers
-# are imported — inductor caches the first cache-dir lookup.
+# are imported -- inductor caches the first cache-dir lookup.
 os.environ.setdefault(
     "TORCHINDUCTOR_CACHE_DIR",
-    str(Path("~/.cache/modality-forcing/torchinductor").expanduser()))
+    str(Path("~/.cache/modality-forcing/torchinductor").expanduser()),
+)
 
 # The vendored flux_rgbd package lives next to this file.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -67,18 +68,27 @@ def _ensure_runner() -> FluxRGBDRunner:
         res = int(os.environ.get("IMG_RESOLUTION", "512"))
         # Never compile on a Space: ZeroGPU runs each @spaces.GPU call in a
         # fresh process, which would recompile on every generation.
-        compile_model = (os.environ.get("COMPILE") == "1"
-                         and not os.environ.get("SPACE_ID"))
+        compile_model = os.environ.get("COMPILE") == "1" and not os.environ.get(
+            "SPACE_ID"
+        )
         if os.environ.get("COMPILE") == "1" and not compile_model:
-            print("[boot] COMPILE=1 ignored: torch.compile is unsupported "
-                  "on ZeroGPU Spaces.", flush=True)
-        print(f"[boot] loading {WEIGHTS_REPO} @ {res}px (text encoder: {text_encoder})"
-              f"{' [torch.compile]' if compile_model else ''}…",
-              flush=True)
+            print(
+                "[boot] COMPILE=1 ignored: torch.compile is unsupported "
+                "on ZeroGPU Spaces.",
+                flush=True,
+            )
+        print(
+            f"[boot] loading {WEIGHTS_REPO} @ {res}px (text encoder: {text_encoder})"
+            f"{' [torch.compile]' if compile_model else ''}…",
+            flush=True,
+        )
         _runner = FluxRGBDRunner.from_pretrained(
-            WEIGHTS_REPO, device="cuda",
-            dtype=torch.bfloat16, head_dtype=torch.float32,
-            text_encoder=text_encoder, img_hw=(res, res),
+            WEIGHTS_REPO,
+            device="cuda",
+            dtype=torch.bfloat16,
+            head_dtype=torch.float32,
+            text_encoder=text_encoder,
+            img_hw=(res, res),
             compile_model=compile_model,
         )
         print("[boot] runner ready.", flush=True)
@@ -93,28 +103,31 @@ _SH_C0 = 0.28209479177387814
 def _letterbox(img: np.ndarray, target: int = 512):
     """Resize so long side = target, then zero-pad to (target, target)."""
     import cv2
+
     h_in, w_in = img.shape[:2]
     if h_in >= w_in:
-        h_out, w_out = target, max(1, int(round(w_in * target / h_in)))
+        h_out, w_out = target, max(1, round(w_in * target / h_in))
     else:
-        w_out, h_out = target, max(1, int(round(h_in * target / w_in)))
+        w_out, h_out = target, max(1, round(h_in * target / w_in))
     resized = cv2.resize(img, (w_out, h_out), interpolation=cv2.INTER_AREA)
-    canvas = np.zeros((target, target, img.shape[2] if img.ndim == 3 else 1),
-                      dtype=img.dtype)
+    canvas = np.zeros(
+        (target, target, img.shape[2] if img.ndim == 3 else 1), dtype=img.dtype
+    )
     if img.ndim == 2:
         canvas = canvas[..., 0]
     top = (target - h_out) // 2
     left = (target - w_out) // 2
-    canvas[top:top + h_out, left:left + w_out] = resized
+    canvas[top : top + h_out, left : left + w_out] = resized
     return canvas, (top, left, h_out, w_out)
 
 
-def _depth_to_pointcloud(rgb_u8, depth, *, fov_deg=65.0, max_points=1_200_000,
-                         edge_rtol=0.04, sor=False):
+def _depth_to_pointcloud(
+    rgb_u8, depth, *, fov_deg=65.0, max_points=1_200_000, edge_rtol=0.04, sor=False
+):
     h, w = depth.shape
     fx = w / (2.0 * np.tan(np.deg2rad(fov_deg) / 2.0))
     cx, cy = w * 0.5, h * 0.5
-    # Keep every valid pixel — no percentile clip. The earlier [1, 99] clip
+    # Keep every valid pixel -- no percentile clip. The earlier [1, 99] clip
     # discarded the nearest 1% of points, carving a hole in the closest
     # surface (e.g. the front edge of a table) and also dropping the far
     # background. The i2d depth is clean enough that this clipping isn't
@@ -133,7 +146,7 @@ def _depth_to_pointcloud(rgb_u8, depth, *, fov_deg=65.0, max_points=1_200_000,
     cols = rgb_u8[v_idx, u_idx]
     if sor:
         # Statistical outlier rejection: drops isolated floaters, but can
-        # over-trim fine structures — opt-in (the edge mask above is the
+        # over-trim fine structures -- opt-in (the edge mask above is the
         # default cleanup).
         inliers = statistical_outlier_mask(pts)
         pts, cols = pts[inliers], cols[inliers]
@@ -146,8 +159,9 @@ def _depth_to_pointcloud(rgb_u8, depth, *, fov_deg=65.0, max_points=1_200_000,
 
 
 def _save_glb(path, points, colors):
-    """Colored point cloud → binary glTF, the format gr.Model3D handles cleanly."""
+    """Colored point cloud -> binary glTF, the format gr.Model3D handles cleanly."""
     import trimesh
+
     cloud = trimesh.PointCloud(vertices=points, colors=colors)
     scene = trimesh.Scene()
     scene.add_geometry(cloud)
@@ -155,12 +169,13 @@ def _save_glb(path, points, colors):
 
 
 def _depth_to_magma(depth: np.ndarray) -> np.ndarray:
-    """Depth → magma-colormapped disparity image (uint8 RGB).
+    """Depth -> magma-colormapped disparity image (uint8 RGB).
 
-    Visualizes 1/depth (so near = bright) robustly normalized to the 5–95th
+    Visualizes 1/depth (so near = bright) robustly normalized to the 5-95th
     percentile, matching the depth panel in the reference notebook.
     """
     from matplotlib import cm
+
     valid = (depth > 0) & np.isfinite(depth)
     disparity = np.zeros_like(depth, dtype=np.float32)
     if valid.any():
@@ -173,7 +188,7 @@ def _depth_to_magma(depth: np.ndarray) -> np.ndarray:
 
 # Must live under tempfile.gettempdir(): Gradio only serves files from the
 # system temp dir (or cwd), and gettempdir() honors TMPDIR, which clusters
-# often point away from /tmp — a hardcoded /tmp breaks serving there. On HF
+# often point away from /tmp -- a hardcoded /tmp breaks serving there. On HF
 # Spaces it still resolves to /tmp, the writable mount. We write the PLY here
 # from the parent process (i.e. NOT inside the @spaces.GPU subprocess) so
 # Gradio's file route can read it. Unique filename per call so Gradio's
@@ -192,16 +207,22 @@ def _prune_old_artifacts() -> None:
             if now - f.stat().st_mtime > _ARTIFACT_TTL_S:
                 f.unlink()
         except OSError:
-            pass  # concurrent delete / fs hiccup — never fail a generation
+            pass  # concurrent delete / fs hiccup -- never fail a generation
 
 
 _ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @spaces.GPU(duration=120)
-def _sample_on_gpu(prompt: str, input_image,
-                   num_steps: int, cfg_scale: float, seed: int,
-                   refine_depth: bool = True, log2_alpha: float = 5.0):
+def _sample_on_gpu(
+    prompt: str,
+    input_image,
+    num_steps: int,
+    cfg_scale: float,
+    seed: int,
+    refine_depth: bool = True,
+    log2_alpha: float = 5.0,
+):
     """GPU-only step: text encode + diffusion sample + VAE decode.
 
     Returns plain numpy arrays so the parent process (which is what
@@ -210,6 +231,7 @@ def _sample_on_gpu(prompt: str, input_image,
     Gradio file route can't find it (returns 404).
     """
     import time
+
     runner = _ensure_runner()
     mode = "i2d" if input_image is not None else "joint"
 
@@ -225,47 +247,70 @@ def _sample_on_gpu(prompt: str, input_image,
 
     t0 = time.time()
     if mode == "i2d":
-        # Image given: single image→depth pass at CFG 1.0 (no guidance — the
+        # Image given: single image->depth pass at CFG 1.0 (no guidance -- the
         # RGB is fixed, so there is nothing for CFG to steer).
         result = runner.generate(
             prompt.strip() if prompt else "",
             mode="i2d",
-            num_steps=int(num_steps), cfg_scale=1.0, seed=int(seed),
+            num_steps=int(num_steps),
+            cfg_scale=1.0,
+            seed=int(seed),
             clean_rgb_image=model_input,
         )
     else:
-        # Text→RGBD. Stage 1 joint at the requested CFG (default 4.0), rgb-first
+        # Text->RGBD. Stage 1 joint at the requested CFG (default 4.0), rgb-first
         # trajectory (log2_alpha=5) for cleaner depth. When `refine_depth` is on,
         # a stage 2 re-derives depth via i2d on that RGB at CFG 1.0 for sharper,
         # RGB-consistent geometry; otherwise the single joint pass is used.
         result = runner.generate(
             prompt.strip() if prompt else "",
             mode="joint",
-            num_steps=int(num_steps), cfg_scale=float(cfg_scale), seed=int(seed),
+            num_steps=int(num_steps),
+            cfg_scale=float(cfg_scale),
+            seed=int(seed),
             log2_alpha=float(log2_alpha),
-            refine_depth_i2d=bool(refine_depth), i2d_cfg_scale=1.0,
+            refine_depth_i2d=bool(refine_depth),
+            i2d_cfg_scale=1.0,
         )
     elapsed = time.time() - t0
 
-    rgb_for_pc = (letterboxed[top:top + vh, left:left + vw] if mode == "i2d"
-                  else result["rgb"])
+    rgb_for_pc = (
+        letterboxed[top : top + vh, left : left + vw]
+        if mode == "i2d"
+        else result["rgb"]
+    )
     depth = result["depth"]
     if mode == "i2d":
-        depth = depth[top:top + vh, left:left + vw]
+        depth = depth[top : top + vh, left : left + vw]
     return rgb_for_pc, depth, mode, elapsed
 
 
-def generate(prompt: str, input_image, num_steps: int, cfg_scale: float, seed: int,
-             refine_depth: bool = True, log2_alpha: float = 5.0,
-             edge_rtol: float = 0.04, sor: bool = False):
+def generate(
+    prompt: str,
+    input_image,
+    num_steps: int,
+    cfg_scale: float,
+    seed: int,
+    refine_depth: bool = True,
+    log2_alpha: float = 5.0,
+    edge_rtol: float = 0.04,
+    sor: bool = False,
+):
     """Public Gradio handler. Runs the GPU step then does PLY writing
     here in the parent process so the file persists for Gradio."""
     rgb_for_pc, depth, mode, elapsed = _sample_on_gpu(
-        prompt, input_image, num_steps, cfg_scale, seed, refine_depth, log2_alpha,
+        prompt,
+        input_image,
+        num_steps,
+        cfg_scale,
+        seed,
+        refine_depth,
+        log2_alpha,
     )
 
-    pts, cols = _depth_to_pointcloud(rgb_for_pc, depth, edge_rtol=edge_rtol,
-                                     sor=bool(sor))
+    pts, cols = _depth_to_pointcloud(
+        rgb_for_pc, depth, edge_rtol=edge_rtol, sor=bool(sor)
+    )
     _prune_old_artifacts()
     cloud_path = str(_ARTIFACT_DIR / f"cloud_{uuid.uuid4().hex[:12]}.glb")
     _save_glb(cloud_path, pts, cols)
@@ -297,7 +342,7 @@ _CODE_URL = "https://github.com/Duisterhof/modality-forcing"
 # Mono for the small uppercase "eyebrow" labels. The serif display face for
 # the title (Gilda Display) is pulled in via @import in the CSS below.
 _THEME = gr.themes.Default(
-    # System fonts only — no Google-fetched web fonts for the body/mono, which
+    # System fonts only -- no Google-fetched web fonts for the body/mono, which
     # were loading unreliably (falling back to Arial and looking cheap). The
     # serif display title uses Gilda Display, pulled in via @import in the CSS.
     font=(
@@ -355,7 +400,8 @@ html, body, gradio-app, .gradio-container, .gradio-container .gap {
     max-width: 1120px !important;
     margin: 0 auto !important;
     padding: 28px 24px 12px !important;
-    font-family: system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif !important;
+    font-family: system-ui, -apple-system, "Segoe UI", "Helvetica Neue",
+        Arial, sans-serif !important;
 }
 
 /* Components become quiet white cards: hairline edge, soft round corners,
@@ -476,35 +522,44 @@ _HEADER_HTML = (
     '<div class="mf-pub">'
     '<h1 class="mf-pub-title">Modality Forcing for Scalable Spatial Generation</h1>'
     '<div class="mf-authors">'
-    '<span class="ab"><a href="https://bart-ai.com" target="_blank" rel="noreferrer">Bardienus Pieter Duisterhof</a><sup>1,2</sup>,</span>'
-    '<span class="ab"><a href="https://www.cs.cmu.edu/~deva/" target="_blank" rel="noreferrer">Deva Ramanan</a><sup>1</sup>,</span>'
-    '<span class="ab"><a href="https://ichnow.ski" target="_blank" rel="noreferrer">Jeffrey Ichnowski</a><sup>1</sup>,</span>'
-    '<span class="ab"><a href="https://web.eecs.umich.edu/~justincj/" target="_blank" rel="noreferrer">Justin Johnson</a><sup>2</sup>,</span>'
-    '<span class="ab"><a href="https://keunhong.com" target="_blank" rel="noreferrer">Keunhong Park</a><sup>2</sup></span>'
-    '</div>'
+    '<span class="ab"><a href="https://bart-ai.com" target="_blank" '
+    'rel="noreferrer">Bardienus Pieter Duisterhof</a><sup>1,2</sup>,</span>'
+    '<span class="ab"><a href="https://www.cs.cmu.edu/~deva/" target="_blank" '
+    'rel="noreferrer">Deva Ramanan</a><sup>1</sup>,</span>'
+    '<span class="ab"><a href="https://ichnow.ski" target="_blank" '
+    'rel="noreferrer">Jeffrey Ichnowski</a><sup>1</sup>,</span>'
+    '<span class="ab"><a href="https://web.eecs.umich.edu/~justincj/" '
+    'target="_blank" rel="noreferrer">Justin Johnson</a><sup>2</sup>,</span>'
+    '<span class="ab"><a href="https://keunhong.com" target="_blank" '
+    'rel="noreferrer">Keunhong Park</a><sup>2</sup></span>'
+    "</div>"
     '<div class="mf-affil">'
     '<span class="ab"><sup>1</sup>Carnegie Mellon University</span>'
     '<span class="ab"><sup>2</sup>World Labs</span>'
-    '</div>'
+    "</div>"
     '<div class="mf-logos">'
-    '<img alt="Carnegie Mellon University" src="https://modality-forcing.github.io/static/images/cmu_logo.png">'
-    '<img alt="World Labs" src="https://modality-forcing.github.io/static/images/world_labs_logo.jpg" style="border-radius:12px;">'
-    '</div>'
+    '<img alt="Carnegie Mellon University" '
+    'src="https://modality-forcing.github.io/static/images/cmu_logo.png">'
+    '<img alt="World Labs" '
+    'src="https://modality-forcing.github.io/static/images/world_labs_logo.jpg" '
+    'style="border-radius:12px;">'
+    "</div>"
     '<div class="mf-venue">Preprint, 2026</div>'
     '<div class="mf-links">'
-    f'<a class="mf-btn" href="{_PROJECT_URL}" target="_blank" rel="noopener">📄 Project Page</a>'
+    f'<a class="mf-btn" href="{_PROJECT_URL}" target="_blank" '
+    'rel="noopener">📄 Project Page</a>'
     f'<a class="mf-btn" href="{_ARXIV_URL}" target="_blank" rel="noopener">📚 arXiv</a>'
     f'<a class="mf-btn" href="{_CODE_URL}" target="_blank" rel="noopener">⌨ Code</a>'
-    '</div>'
+    "</div>"
     '<div class="mf-pub-sub" style="text-align:center !important;">Modality '
-    'Forcing turns a pretrained text-to-image diffusion transformer into a '
-    'joint image-depth generator with a simple post-training recipe.</div>'
-    '</div>'
+    "Forcing turns a pretrained text-to-image diffusion transformer into a "
+    "joint image-depth generator with a simple post-training recipe.</div>"
+    "</div>"
 )
 
 _INTRO_HTML = (
     '<div class="mf-intro">Type a scene and press <b>Generate</b>, or upload an '
-    'image to run <b>image→depth</b> mode instead.</div>'
+    "image to run <b>image→depth</b> mode instead.</div>"
 )
 
 _EXAMPLE_IMAGES = [
@@ -515,16 +570,26 @@ _EXAMPLE_IMAGES = [
 
 _EXAMPLE_PROMPTS = [
     [DEFAULT_PROMPT],
-    ["A sunlit Scandinavian living room with a linen sofa, a low oak coffee "
-     "table, and tall windows opening onto a snowy courtyard."],
-    ["A misty pine forest at dawn, shafts of golden light cutting between the "
-     "trunks and a narrow dirt trail winding into the distance."],
-    ["A cozy bookshop interior with floor-to-ceiling wooden shelves, a rolling "
-     "ladder, warm pendant lighting, and a worn leather reading chair."],
-    ["A still life on a marble countertop: a bowl of ripe lemons, a ceramic "
-     "pitcher, and a sprig of rosemary lit by soft side light."],
-    ["A coastal cliffside at golden hour overlooking a turquoise bay, with wild "
-     "grass in the foreground and distant sailboats on the water."],
+    [
+        "A sunlit Scandinavian living room with a linen sofa, a low oak coffee "
+        "table, and tall windows opening onto a snowy courtyard."
+    ],
+    [
+        "A misty pine forest at dawn, shafts of golden light cutting between the "
+        "trunks and a narrow dirt trail winding into the distance."
+    ],
+    [
+        "A cozy bookshop interior with floor-to-ceiling wooden shelves, a rolling "
+        "ladder, warm pendant lighting, and a worn leather reading chair."
+    ],
+    [
+        "A still life on a marble countertop: a bowl of ripe lemons, a ceramic "
+        "pitcher, and a sprig of rosemary lit by soft side light."
+    ],
+    [
+        "A coastal cliffside at golden hour overlooking a turquoise bay, with wild "
+        "grass in the foreground and distant sailboats on the water."
+    ],
 ]
 
 with gr.Blocks(title="Modality Forcing — World Labs") as demo:
@@ -543,34 +608,50 @@ with gr.Blocks(title="Modality Forcing — World Labs") as demo:
             )
             input_image = gr.Image(
                 label="Optional input image (switches to image→depth mode)",
-                type="numpy", height=200, sources=("upload", "clipboard"),
+                type="numpy",
+                height=200,
+                sources=("upload", "clipboard"),
             )
             btn = gr.Button("Generate", variant="primary", size="lg")
 
             with gr.Accordion("Advanced settings", open=False):
                 with gr.Row():
                     num_steps = gr.Slider(
-                        1, 80, value=50, step=1, label="Sampling steps")
+                        1, 80, value=50, step=1, label="Sampling steps"
+                    )
                     cfg_scale = gr.Slider(
-                        1.0, 8.0, value=4.0, step=0.1,
-                        label="Guidance (CFG) — text mode only")
+                        1.0,
+                        8.0,
+                        value=4.0,
+                        step=0.1,
+                        label="Guidance (CFG) — text mode only",
+                    )
                 log2_alpha = gr.Slider(
-                    -5.0, 5.0, value=5.0, step=0.5,
+                    -5.0,
+                    5.0,
+                    value=5.0,
+                    step=0.5,
                     label="log2(alpha) — depth trajectory (>0 rgb-first, "
-                          "cleaner depth; 0 diagonal; <0 depth-first) — text mode")
+                    "cleaner depth; 0 diagonal; <0 depth-first) — text mode",
+                )
                 edge_rtol = gr.Slider(
-                    0.0, 0.25, value=0.04, step=0.005,
+                    0.0,
+                    0.25,
+                    value=0.04,
+                    step=0.005,
                     label="Point-cloud depth-edge mask (rtol) — drop pixels at "
-                          "depth jumps > this; lower = more aggressive, 0 = off")
+                    "depth jumps > this; lower = more aggressive, 0 = off",
+                )
                 sor_toggle = gr.Checkbox(
                     value=False,
                     label="Statistical outlier removal (point cloud) — drops "
-                          "isolated floaters; can over-trim fine structures")
+                    "isolated floaters; can over-trim fine structures",
+                )
                 seed = gr.Number(value=0, precision=0, label="Seed")
                 refine_depth = gr.Checkbox(
                     value=True,
                     label="Refine depth: joint (CFG) → image→depth (CFG 1) "
-                          "— text mode only",
+                    "— text mode only",
                 )
 
             status = gr.Textbox(label="Status", interactive=False)
@@ -579,15 +660,20 @@ with gr.Blocks(title="Modality Forcing — World Labs") as demo:
             gr.HTML('<div class="mf-sec">Output</div>', elem_classes="mf-bare")
             with gr.Row():
                 rgb_out = gr.Image(
-                    label="RGB image", type="numpy", height=320, format="png")
+                    label="RGB image", type="numpy", height=320, format="png"
+                )
                 depth_out = gr.Image(
                     label="Depth (disparity, magma)",
-                    type="numpy", height=320, format="png")
+                    type="numpy",
+                    height=320,
+                    format="png",
+                )
             with gr.Group():
                 cloud_out = gr.Model3D(
                     label="Interactive 3D point cloud",
                     clear_color=(0.12, 0.12, 0.14, 1.0),
-                    zoom_speed=0.5, pan_speed=0.5,
+                    zoom_speed=0.5,
+                    pan_speed=0.5,
                     height=520,
                 )
 
@@ -628,19 +714,28 @@ with gr.Blocks(title="Modality Forcing — World Labs") as demo:
         '<div class="mf-cta">Built by <a href="' + WORLD_LABS_URL + '" '
         'target="_blank" rel="noopener noreferrer">World Labs</a></div>'
         '<div class="mf-credit">worldlabs.ai · Modality Forcing</div>'
-        '</div>',
+        "</div>",
         elem_classes="mf-bare",
     )
 
     btn.click(
         generate,
-        inputs=[prompt, input_image, num_steps, cfg_scale, seed, refine_depth,
-                log2_alpha, edge_rtol, sor_toggle],
+        inputs=[
+            prompt,
+            input_image,
+            num_steps,
+            cfg_scale,
+            seed,
+            refine_depth,
+            log2_alpha,
+            edge_rtol,
+            sor_toggle,
+        ],
         outputs=[rgb_out, depth_out, cloud_out, status],
     )
 
-    # Adding an image switches the demo into image→depth mode, where the prompt
-    # is optional — clear it so it defaults to empty. The user can retype one.
+    # Adding an image switches the demo into image->depth mode, where the prompt
+    # is optional -- clear it so it defaults to empty. The user can retype one.
     input_image.change(
         lambda img: "" if img is not None else gr.update(),
         inputs=[input_image],
@@ -649,7 +744,7 @@ with gr.Blocks(title="Modality Forcing — World Labs") as demo:
 
 # The UI is designed light-only (paper-white cards, explicit light CSS). A
 # visitor whose OS is in dark mode otherwise gets gradio's dark text colors on
-# our light backgrounds — an unreadable mix. Redirect to ?__theme=light in
+# our light backgrounds -- an unreadable mix. Redirect to ?__theme=light in
 # <head>, before gradio boots, so every visitor gets the light theme.
 _FORCE_LIGHT_HEAD = """
 <script>

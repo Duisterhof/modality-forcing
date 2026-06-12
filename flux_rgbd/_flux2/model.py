@@ -82,8 +82,7 @@ class Flux2(nn.Module):
         self.out_channels = in_channels
         if hidden_size % num_heads != 0:
             raise ValueError(
-                f"Hidden size {hidden_size} must be divisible by "
-                f"num_heads {num_heads}"
+                f"Hidden size {hidden_size} must be divisible by num_heads {num_heads}"
             )
         pe_dim = hidden_size // num_heads
         if sum(axes_dim) != pe_dim:
@@ -394,9 +393,9 @@ class DoubleStreamBlock(nn.Module):
         super().__init__()
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         self.num_heads = num_heads
-        assert (
-            hidden_size % num_heads == 0
-        ), f"{hidden_size=} must be divisible by {num_heads=}"
+        assert hidden_size % num_heads == 0, (
+            f"{hidden_size=} must be divisible by {num_heads=}"
+        )
 
         self.hidden_size = hidden_size
         self.img_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)

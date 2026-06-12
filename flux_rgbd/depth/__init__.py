@@ -5,4 +5,4 @@
 from flux_rgbd.depth.preprocess import DepthConfig, decode_depth
 from flux_rgbd.depth.schedule import ScheduleConfig, rollout_timesteps
 
-__all__ = ["DepthConfig", "decode_depth", "ScheduleConfig", "rollout_timesteps"]
+__all__ = ["DepthConfig", "ScheduleConfig", "decode_depth", "rollout_timesteps"]
