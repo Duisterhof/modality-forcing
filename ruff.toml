@@ -1,0 +1,3 @@
+[lint]
+# jaxtyping shape annotations (Float[Tensor, "b c h w"]) trip F722.
+ignore = ["F722"]

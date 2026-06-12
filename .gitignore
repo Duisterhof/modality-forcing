@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+outputs/
+*.glb
+.DS_Store
+.ipynb_checkpoints/
+i2d_images/
+review_generations/
+.gradio/
