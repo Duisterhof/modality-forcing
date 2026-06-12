@@ -244,8 +244,13 @@ python app.py        # or: uv run app.py
 
 For a long-lived local demo, `COMPILE=1 python app.py` torch.compiles the DiT
 (one-time cost on the first generation, then every later generation benefits).
-The variable is ignored on HF Spaces, where ZeroGPU does not support
-torch.compile.
+
+On HF Spaces, ZeroGPU cannot use torch.compile (it forks a fresh process per
+GPU call); the app instead compiles the DiT ahead of time with the `spaces`
+AoT path, on by default. The compiled package is cached on disk (`/data` if
+the Space has persistent storage) and reloads in milliseconds on later boots;
+set `ZEROGPU_AOTI=0` to opt out, or `ZEROGPU_AOTI=1` to exercise the same
+path locally.
 
 ## How It Works
 

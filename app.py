@@ -3,9 +3,13 @@
 """HuggingFace ZeroGPU Space for flux_rgbd.
 
 Wraps the same generate-and-render path used by the local demo with
-``@spaces.GPU`` so HF ZeroGPU can attach a GPU per call. The model
-loads at module-level (CPU), then moves to CUDA inside the first
-decorated call.
+``@spaces.GPU`` so HF ZeroGPU can attach a GPU per call. On a Space the
+model is placed on cuda at module level (per ZeroGPU guidance: a CUDA
+emulation mode records startup placements, which makes per-call
+transfers fast) and the DiT is compiled ahead of time -- ZeroGPU forks
+a fresh process per GPU call, so torch.compile cannot be used; the
+``spaces`` AoT path compiles once and reloads the saved package in
+milliseconds. Off-Space, the model loads lazily on first use.
 """
 
 import os
@@ -50,9 +54,16 @@ DEFAULT_PROMPT = (
     "light filters through a small window above the sink."
 )
 
-# Lazy-loaded runner. On ZeroGPU the model is loaded inside the first
-# @spaces.GPU call so the import path costs nothing.
+# On a Space the runner is created at module level (see the bottom of this
+# file); off-Space it stays lazy so importing the app costs nothing.
 _runner: FluxRGBDRunner | None = None
+
+_ON_SPACE = bool(os.environ.get("SPACE_ID"))
+# ZeroGPU ahead-of-time compilation: on by default on Spaces, ZEROGPU_AOTI=0
+# opts out; ZEROGPU_AOTI=1 forces it on locally (useful for testing).
+_AOTI_ENABLED = (_ON_SPACE or os.environ.get("ZEROGPU_AOTI") == "1") and os.environ.get(
+    "ZEROGPU_AOTI"
+) != "0"
 
 
 def _ensure_runner() -> FluxRGBDRunner:
@@ -66,14 +77,15 @@ def _ensure_runner() -> FluxRGBDRunner:
         # (512 for the default model, 1024 for the 1024 checkpoint). Set
         # IMG_RESOLUTION=1024 alongside WEIGHTS_REPO when using the 1024 ckpt.
         res = int(os.environ.get("IMG_RESOLUTION", "512"))
-        # Never compile on a Space: ZeroGPU runs each @spaces.GPU call in a
-        # fresh process, which would recompile on every generation.
+        # Never torch.compile on a Space: ZeroGPU runs each @spaces.GPU call
+        # in a fresh process, which would recompile on every generation. The
+        # Space uses ahead-of-time compilation instead (see _enable_aoti).
         want_compile = os.environ.get("COMPILE") == "1"
-        compile_model = want_compile and not os.environ.get("SPACE_ID")
+        compile_model = want_compile and not _ON_SPACE and not _AOTI_ENABLED
         if want_compile and not compile_model:
             print(
-                "[boot] COMPILE=1 ignored: torch.compile is unsupported "
-                "on ZeroGPU Spaces.",
+                "[boot] COMPILE=1 ignored: ZeroGPU Spaces use ahead-of-time "
+                "compilation instead (on by default).",
                 flush=True,
             )
         print(
@@ -213,7 +225,78 @@ def _prune_old_artifacts() -> None:
 _ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-@spaces.GPU(duration=120)
+# --- ZeroGPU startup ---------------------------------------------------------
+
+
+def _aoti_package_dir() -> Path:
+    """Cache dir for the AOT-compiled DiT, keyed by what invalidates it."""
+    res = int(os.environ.get("IMG_RESOLUTION", "512"))
+    variant = f"{WEIGHTS_REPO.replace('/', '--')}-{res}px-torch{torch.__version__}"
+    if override := os.environ.get("ZEROGPU_AOTI_CACHE"):
+        return Path(override) / variant
+    if _ON_SPACE and Path("/data").is_dir():  # persistent storage, if enabled
+        return Path("/data/aoti-cache") / variant
+    return Path("~/.cache/modality-forcing/aoti").expanduser() / variant
+
+
+def _enable_aoti(runner: FluxRGBDRunner) -> None:
+    """Compile the DiT ahead of time and reuse the saved package.
+
+    torch.compile cannot work on ZeroGPU (fresh process per @spaces.GPU
+    call), so the Space uses the spaces AoT path instead: export the DiT
+    once, compile it to a package on disk, and have every later boot and
+    every GPU worker load that package in milliseconds. See
+    https://huggingface.co/blog/zerogpu-aoti.
+    """
+    pkg_dir = _aoti_package_dir()
+    if not (pkg_dir / "root" / "package.pt2").exists():
+
+        @spaces.GPU(duration=1500)
+        def _compile() -> None:
+            dit = runner.model.dit
+            with spaces.aoti_capture(dit) as call:
+                runner.generate(
+                    DEFAULT_PROMPT, mode="joint", num_steps=1, cfg_scale=4.0, seed=0
+                )
+            exported = torch.export.export(dit, args=call.args, kwargs=call.kwargs)
+            spaces.aoti_compile_and_save(pkg_dir, exported)
+
+        print(
+            f"[boot] AOT-compiling the DiT (one-time, cached at {pkg_dir})",
+            flush=True,
+        )
+        _compile()
+    spaces.aoti_load_from_package_dir(runner.model.dit, pkg_dir)
+    print("[boot] ZeroGPU AOTI active.", flush=True)
+
+
+if _ON_SPACE or _AOTI_ENABLED:
+    # ZeroGPU guidance: place models on cuda at module level (a CUDA emulation
+    # mode records startup placements and optimizes the per-call transfers);
+    # lazy-loading inside @spaces.GPU is documented as significantly slower.
+    _ensure_runner()
+if _AOTI_ENABLED:
+    try:
+        _enable_aoti(_runner)
+    except Exception as e:
+        print(f"[boot] ZeroGPU AOTI disabled ({e!r}); running eager.", flush=True)
+
+
+def _gpu_duration(
+    prompt: str,
+    input_image,
+    num_steps: int,
+    cfg_scale: float,
+    seed: int,
+    refine_depth: bool = True,
+    log2_alpha: float = 5.0,
+) -> int:
+    """Per-call GPU budget; shorter requests get better ZeroGPU queue priority."""
+    passes = 2 if (refine_depth and input_image is None) else 1
+    return min(30 + num_steps * passes, 150)
+
+
+@spaces.GPU(duration=_gpu_duration)
 def _sample_on_gpu(
     prompt: str,
     input_image,
