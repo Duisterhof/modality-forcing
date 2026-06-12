@@ -168,11 +168,21 @@ scripts/joint.py …`.)
 
 All three scripts share these options: `--prompt`, `--model`, `--text-encoder`,
 `--num-steps` (default 50), `--seed`, `--device`, `--resolution` (default 512;
-must match the checkpoint's training resolution), and `--output-dir` (default
-`./outputs`). Inference runs in bfloat16 (the depth head in fp32). Each run writes
-a timestamped subdirectory containing `rgb.png`, `depth_raw.npy` (raw depth,
-relative scale — unit-mean normalized), `depth_magma.png` (disparity
-visualization, near = bright), and `metadata.json`.
+must match the checkpoint's training resolution), `--output-dir` (default
+`./outputs`), and `--compile`. Inference runs in bfloat16 (the depth head in
+fp32).
+
+`--compile` runs the DiT under `torch.compile(mode="reduce-overhead")` (CUDA
+graphs) for a ~1.4× faster sampling loop. The first run spends a few minutes
+compiling (about a minute once Triton's kernel cache is warm); kernels are
+cached at `~/.cache/modality-forcing/torchinductor` (override with
+`TORCHINDUCTOR_CACHE_DIR`), so subsequent runs warm-start in seconds. Worth it
+for repeated generations; a single one-off run is faster without it.
+
+Each run writes a timestamped subdirectory containing `rgb.png`,
+`depth_raw.npy` (raw depth, relative scale — unit-mean normalized),
+`depth_magma.png` (disparity visualization, near = bright), and
+`metadata.json`.
 
 ### Joint — text → RGB + depth
 
@@ -231,6 +241,11 @@ Try the model without installing anything in the
 ```bash
 python app.py        # or: uv run app.py
 ```
+
+For a long-lived local demo, `COMPILE=1 python app.py` torch.compiles the DiT
+(one-time cost on the first generation, then every later generation benefits).
+The variable is ignored on HF Spaces, where ZeroGPU does not support
+torch.compile.
 
 ## How It Works
 

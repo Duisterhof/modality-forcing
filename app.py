@@ -15,6 +15,12 @@ import time
 import uuid
 from pathlib import Path
 
+# Persistent torch.compile kernel cache. Must be set before torch/transformers
+# are imported — inductor caches the first cache-dir lookup.
+os.environ.setdefault(
+    "TORCHINDUCTOR_CACHE_DIR",
+    str(Path("~/.cache/modality-forcing/torchinductor").expanduser()))
+
 # The vendored flux_rgbd package lives next to this file.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -59,12 +65,21 @@ def _ensure_runner() -> FluxRGBDRunner:
         # (512 for the default model, 1024 for the 1024 checkpoint). Set
         # IMG_RESOLUTION=1024 alongside WEIGHTS_REPO when using the 1024 ckpt.
         res = int(os.environ.get("IMG_RESOLUTION", "512"))
-        print(f"[boot] loading {WEIGHTS_REPO} @ {res}px (text encoder: {text_encoder})…",
+        # Never compile on a Space: ZeroGPU runs each @spaces.GPU call in a
+        # fresh process, which would recompile on every generation.
+        compile_model = (os.environ.get("COMPILE") == "1"
+                         and not os.environ.get("SPACE_ID"))
+        if os.environ.get("COMPILE") == "1" and not compile_model:
+            print("[boot] COMPILE=1 ignored: torch.compile is unsupported "
+                  "on ZeroGPU Spaces.", flush=True)
+        print(f"[boot] loading {WEIGHTS_REPO} @ {res}px (text encoder: {text_encoder})"
+              f"{' [torch.compile]' if compile_model else ''}…",
               flush=True)
         _runner = FluxRGBDRunner.from_pretrained(
             WEIGHTS_REPO, device="cuda",
             dtype=torch.bfloat16, head_dtype=torch.float32,
             text_encoder=text_encoder, img_hw=(res, res),
+            compile_model=compile_model,
         )
         print("[boot] runner ready.", flush=True)
     return _runner

@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
+import sys
 from pathlib import Path
 
 import cv2
@@ -92,13 +93,20 @@ class FluxRGBDRunner:
     def from_pretrained(cls, repo_id_or_path, *, device="cuda",
                         dtype=torch.float32, head_dtype: torch.dtype | None = None,
                         text_encoder="Qwen/Qwen3-8B",
-                        img_hw=(512, 512), latent_compression=16):
+                        img_hw=(512, 512), latent_compression=16,
+                        compile_model: bool = False):
         """Load model + decoder + embedder. Path or HuggingFace Hub repo id.
 
         ``head_dtype`` (optional) overrides the dtype of the depth output head.
         Setting ``dtype=torch.bfloat16, head_dtype=torch.float32`` runs the
         DiT body in BF16 (fast) but keeps the depth final layer in FP32,
         which avoids BF16 quantization artifacts under x-prediction.
+
+        ``compile_model`` torch.compiles the DiT with CUDA graphs
+        (``mode="reduce-overhead"``). The first forward pays the compile cost
+        (minutes on a fresh machine); kernels are cached on disk so later
+        processes warm-start in seconds. CUDA only; not supported on ZeroGPU
+        Spaces (fresh process per call).
         """
         config_path, weights_path = _load_local_or_hub(repo_id_or_path)
         config = json.loads(config_path.read_text())
@@ -123,6 +131,16 @@ class FluxRGBDRunner:
         model.eval()
         if head_dtype is not None and head_dtype != dtype:
             model.dit.depth_final_layer.to(head_dtype)
+        if compile_model and torch.device(device).type != "cuda":
+            print(f"[compile] torch.compile (reduce-overhead) needs CUDA; "
+                  f"ignoring it on device {device}.", file=sys.stderr)
+            compile_model = False
+        if compile_model:
+            # Compile the inner DiT: the sampling loop calls model.forward()
+            # directly, bypassing the __call__ hook that nn.Module.compile()
+            # wraps; self.dit(...) is reached through __call__. Shapes are
+            # static (fixed text padding + token grid), so CUDA graphs hold.
+            model.dit.compile(mode="reduce-overhead")
 
         decoder = Flux2Decoder().to(device).eval()
         decoder.load_weights()

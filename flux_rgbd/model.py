@@ -130,6 +130,9 @@ class FluxRGBD(nn.Module):
                 depth=depth, depth_timesteps=t_depth_b, guidance=guidance_tensor,
             )
             if use_cfg:
+                # The uncond CUDA-graph replay below overwrites these output
+                # buffers (torch.compile reduce-overhead) — clone before reuse.
+                pred_rgb, pred_depth = pred_rgb.clone(), pred_depth.clone()
                 pred_rgb_u, pred_depth_u = self.forward(
                     img=rgb, timesteps=t_rgb_b, ctx=uncond,
                     img_height=img_height, img_width=img_width,

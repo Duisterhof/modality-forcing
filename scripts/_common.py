@@ -10,8 +10,15 @@ and a couple of small I/O helpers live here.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+# Persistent torch.compile kernel cache. Must be set before torch/transformers
+# are imported — inductor caches the first cache-dir lookup.
+os.environ.setdefault(
+    "TORCHINDUCTOR_CACHE_DIR",
+    str(Path("~/.cache/modality-forcing/torchinductor").expanduser()))
 
 import numpy as np
 
@@ -48,6 +55,11 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
                              "default model, 1024 for the 1024 checkpoint.")
     parser.add_argument("--output-dir", default="./outputs",
                         help="Directory to write rgb / depth / metadata into.")
+    parser.add_argument("--compile", action="store_true",
+                        help="torch.compile the DiT (reduce-overhead). The "
+                             "first run compiles for a few minutes (seconds "
+                             "once the on-disk cache is warm). Pays off for "
+                             "repeated generations.")
 
 
 def load_runner(args: argparse.Namespace) -> FluxRGBDRunner:
@@ -71,6 +83,7 @@ def load_runner(args: argparse.Namespace) -> FluxRGBDRunner:
         head_dtype=torch.float32,
         text_encoder=args.text_encoder,
         img_hw=(res, res),
+        compile_model=bool(getattr(args, "compile", False)),
     )
 
 
