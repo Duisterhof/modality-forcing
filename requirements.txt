@@ -1,8 +1,10 @@
-# Core inference dependencies for the CLI generation scripts.
+# Read by HF Spaces (Spaces cannot read pyproject.toml) and by plain-pip users.
+# Keep in sync with pyproject.toml: this file = [project.dependencies] + torch
+# + accelerate. uv users should `uv sync --extra cuXXX` instead (see README).
 #
-# NOTE on PyTorch: install a build matching YOUR CUDA driver FIRST, or pip may
-# grab a wheel for a newer CUDA than your driver supports and the GPU will be
-# invisible (torch.cuda.is_available() == False). See the README.
+# NOTE on PyTorch for pip users: install a build matching YOUR CUDA driver
+# FIRST, or pip may grab a wheel for a newer CUDA than your driver supports and
+# the GPU will be invisible (torch.cuda.is_available() == False). See README.
 #   e.g. CUDA 12.x:  pip install torch --index-url https://download.pytorch.org/whl/cu128
 torch>=2.5
 einops>=0.8

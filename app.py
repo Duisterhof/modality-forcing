@@ -10,6 +10,7 @@ decorated call.
 
 import os
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -20,7 +21,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gradio as gr
 import numpy as np
 import spaces
-import torch
+
+try:
+    import torch
+except ModuleNotFoundError as e:  # a bare `uv sync` installs everything but torch
+    raise ModuleNotFoundError(
+        "torch is not installed — run `uv sync --extra <cpu|cu126|cu128|cu130>` "
+        "matching your driver (see README → Installation). The cu* extras are "
+        "Linux-only; on macOS use `--extra cpu`."
+    ) from e
 
 from flux_rgbd import FluxRGBDRunner
 from flux_rgbd.pointcloud import depth_edge_mask, statistical_outlier_mask
@@ -147,11 +156,14 @@ def _depth_to_magma(depth: np.ndarray) -> np.ndarray:
     return (cm.magma(disparity)[..., :3] * 255).astype(np.uint8)
 
 
-# /tmp is the writable mount on HF Spaces. We write the PLY here from the
-# parent process (i.e. NOT inside the @spaces.GPU subprocess) so Gradio's
-# file route can read it. Unique filename per call so Gradio's content-
-# hashed cache always serves fresh bytes.
-_ARTIFACT_DIR = Path("/tmp/flux_rgbd_artifacts")
+# Must live under tempfile.gettempdir(): Gradio only serves files from the
+# system temp dir (or cwd), and gettempdir() honors TMPDIR, which clusters
+# often point away from /tmp — a hardcoded /tmp breaks serving there. On HF
+# Spaces it still resolves to /tmp, the writable mount. We write the PLY here
+# from the parent process (i.e. NOT inside the @spaces.GPU subprocess) so
+# Gradio's file route can read it. Unique filename per call so Gradio's
+# content-hashed cache always serves fresh bytes.
+_ARTIFACT_DIR = Path(tempfile.gettempdir()) / "flux_rgbd_artifacts"
 
 # 2h is comfortably longer than any viewer session; keeps a busy Space's
 # /tmp bounded since nothing else ever deletes these.

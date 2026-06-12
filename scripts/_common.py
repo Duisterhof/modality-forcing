@@ -14,14 +14,21 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
+
+try:
+    import torch
+except ModuleNotFoundError as e:  # a bare `uv sync` installs everything but torch
+    raise ModuleNotFoundError(
+        "torch is not installed — run `uv sync --extra <cpu|cu126|cu128|cu130>` "
+        "matching your driver (see README → Installation). The cu* extras are "
+        "Linux-only; on macOS use `--extra cpu`."
+    ) from e
 
 from flux_rgbd import FluxRGBDRunner
 from flux_rgbd.pointcloud import depth_edge_mask, statistical_outlier_mask
 
 DEFAULT_MODEL = "bartduis/modality_forcing"
 DEFAULT_TEXT_ENCODER = "Qwen/Qwen3-8B"
-_DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 
 
 def add_shared_args(parser: argparse.ArgumentParser) -> None:
@@ -35,8 +42,6 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
                         help="Number of flow-matching sampling steps.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--dtype", default="bf16", choices=tuple(_DTYPES),
-                        help="DiT compute dtype (depth head stays fp32).")
     parser.add_argument("--resolution", type=int, default=512,
                         help="Generation resolution (square). Must match the "
                              "checkpoint's training resolution: 512 for the "
@@ -46,22 +51,23 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
 
 
 def load_runner(args: argparse.Namespace) -> FluxRGBDRunner:
-    """Build the runner from parsed args. Body runs in --dtype; the depth head
-    is kept in fp32, which avoids banding artifacts in the depth. The
-    whole pipeline (sampling grid, VAE, depth) runs at ``--resolution``."""
+    """Build the runner from parsed args. The DiT runs in bfloat16 (fp16
+    overflows to NaN in this model); the depth head is kept in fp32, which
+    avoids banding artifacts in the depth. The whole pipeline (sampling grid,
+    VAE, depth) runs at ``--resolution``."""
     res = int(getattr(args, "resolution", 512))
     if res % 16 != 0:
         raise ValueError(f"--resolution must be a multiple of 16; got {res}")
     if str(args.device).startswith("cuda") and not torch.cuda.is_available():
         raise SystemExit(
             "CUDA was requested but torch.cuda.is_available() is False — the "
-            "installed torch build does not match your GPU driver. Re-run "
-            "`bash install.sh` (it installs a matching build), or pass "
-            "--device cpu.")
+            "installed torch build does not match your GPU driver. Reinstall "
+            "a matching build (see README → Installation → Troubleshooting), "
+            "or pass --device cpu.")
     return FluxRGBDRunner.from_pretrained(
         args.model,
         device=args.device,
-        dtype=_DTYPES[args.dtype],
+        dtype=torch.bfloat16,
         head_dtype=torch.float32,
         text_encoder=args.text_encoder,
         img_hw=(res, res),

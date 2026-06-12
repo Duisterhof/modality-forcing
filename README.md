@@ -72,65 +72,76 @@ Requires Python 3.10+ and a CUDA GPU with **at least 48 GB of memory**
 (in bf16 the DiT is ~24 GB and the Qwen3-8B text encoder ~16 GB, plus
 activations — an A100/H100-class card).
 
-**Option A — conda:**
+**Option A — [uv](https://docs.astral.sh/uv/) (recommended):**
 
 ```bash
 git clone https://github.com/Duisterhof/modality-forcing.git
 cd modality-forcing
 
-# Create and activate the environment
-conda create -n mofo python=3.12 -y
-conda activate mofo
-
-# Install PyTorch matching your driver's CUDA, then the dependencies
-bash install.sh
+# Pick the torch extra matching your driver (`nvidia-smi` → "CUDA Version")
+uv sync --extra cu128
 ```
 
-**Option B — uv:**
+| Driver CUDA (`nvidia-smi`) | Command                 |
+|----------------------------|-------------------------|
+| 13.0+                      | `uv sync --extra cu130` |
+| 12.8 – 12.9                | `uv sync --extra cu128` |
+| 12.6 – 12.7                | `uv sync --extra cu126` |
+| ≤ 12.5 / 11.x              | use Option B (cu121/cu118 indexes) |
+| no GPU                     | `uv sync --extra cpu`   |
+
+This creates `.venv/` from the committed `uv.lock`, so you get the exact
+dependency set the release was tested with. Run scripts through `uv run`
+(no activation needed) or activate the env:
+
+```bash
+uv run scripts/joint.py --prompt "a cozy sunlit kitchen with wooden cabinets"
+# or: source .venv/bin/activate && python scripts/joint.py ...
+```
+
+> [!NOTE]
+> A bare `uv sync` (no `--extra`) installs everything **except** PyTorch — if
+> you hit `ModuleNotFoundError: torch`, re-run with an extra from the table.
+
+**Option B — conda / pip:**
 
 ```bash
 git clone https://github.com/Duisterhof/modality-forcing.git
 cd modality-forcing
-uv venv --python 3.12 && source .venv/bin/activate
-PIP="uv pip" bash install.sh
-```
 
-**Option C — venv:**
+conda create -n mofo python=3.12 -y && conda activate mofo
+# (a plain venv works the same: python -m venv .venv && source .venv/bin/activate)
 
-```bash
-git clone https://github.com/Duisterhof/modality-forcing.git
-cd modality-forcing
-python -m venv .venv && source .venv/bin/activate
-bash install.sh
-```
-
-In all three cases `install.sh` installs a PyTorch build matching your GPU
-driver's CUDA version — the usual cause of `torch.cuda.is_available()`
-returning `False` — then the remaining dependencies, and verifies the GPU is
-visible.
-
-<details>
-<summary>Manual install / troubleshooting</summary>
-<br>
-
-Install a PyTorch build matching your driver's CUDA version (check with
-`nvidia-smi`), then the dependencies:
-
-```bash
-# Pick the index for your CUDA: cu128, cu126, cu121, cu118, cu130, … A cu12x
-# wheel runs on any >= that 12.x driver, so it need not match exactly.
+# Install a PyTorch build matching your driver's CUDA FIRST — pick the index
+# for your CUDA: cu130, cu128, cu126, cu121, cu118. A cu12x wheel runs on any
+# >= that 12.x driver, so it need not match exactly.
 pip install torch --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 ```
 
-Verify the GPU is visible — this must print `True`:
+In both cases, verify the GPU is visible — this must print `True`:
 
 ```bash
-python -c "import torch; print(torch.cuda.is_available())"
+python -c "import torch; print(torch.cuda.is_available())"   # uv: prefix with `uv run`
 ```
 
-If it prints `False`, the torch build is for a different CUDA than your driver
-supports; reinstall torch from the correct index above.
+<details>
+<summary>Troubleshooting</summary>
+<br>
+
+- **`torch.cuda.is_available()` is `False` with a GPU present** — the installed
+  torch build targets a newer CUDA than your driver supports. Reinstall from
+  the index matching `nvidia-smi`'s "CUDA Version": with uv, re-run
+  `uv sync --extra <cuXXX>` from the table; with pip,
+  `pip install torch --index-url https://download.pytorch.org/whl/cuXXX`.
+- **`ModuleNotFoundError: torch` after `uv sync`** — you skipped the `--extra`;
+  PyTorch only installs via one of the `cpu`/`cu126`/`cu128`/`cu130` extras.
+- **uv says the extras are incompatible** — the torch extras conflict by
+  design; pick exactly one.
+- **Driver older than CUDA 12.6** — the uv extras don't cover the legacy
+  cu121/cu118 indexes; use Option B with the matching `--index-url`.
+- **macOS** — the `cu*` extras are Linux-only (PyTorch publishes no CUDA
+  builds for macOS); use `uv sync --extra cpu` (Apple silicon only).
 </details>
 
 ## Model Weights
@@ -149,14 +160,16 @@ python scripts/joint.py --prompt "a cozy sunlit kitchen with wooden cabinets"
 ```
 
 This generates an RGB image, a depth map, and a colored 3D point cloud
-from a single text prompt, and writes them to `./outputs/`.
+from a single text prompt, and writes them to `./outputs/`. (uv users can
+run any command in this README without activating the env: `uv run
+scripts/joint.py …`.)
 
 ## Usage
 
 All three scripts share these options: `--prompt`, `--model`, `--text-encoder`,
-`--num-steps` (default 50), `--seed`, `--device`, `--dtype` (`bf16`/`fp16`/`fp32`,
-default `bf16`), `--resolution` (default 512; must match the checkpoint's
-training resolution), and `--output-dir` (default `./outputs`). Each run writes
+`--num-steps` (default 50), `--seed`, `--device`, `--resolution` (default 512;
+must match the checkpoint's training resolution), and `--output-dir` (default
+`./outputs`). Inference runs in bfloat16 (the depth head in fp32). Each run writes
 a timestamped subdirectory containing `rgb.png`, `depth_raw.npy` (raw depth,
 relative scale — unit-mean normalized), `depth_magma.png` (disparity
 visualization, near = bright), and `metadata.json`.
@@ -216,7 +229,7 @@ Try the model without installing anything in the
 `app.py` is the same Gradio app; to run it locally:
 
 ```bash
-python app.py
+python app.py        # or: uv run app.py
 ```
 
 ## How It Works
